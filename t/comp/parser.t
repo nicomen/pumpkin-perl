@@ -223,8 +223,8 @@ EOF
 eval q{ foo::$bar };
 like( $@, qr/Bad name after foo::/, 'Bad name after foo::' );
 eval q{ foo''bar };
-like( $@, qr/Bad name after foo'/, 'Bad name after foo\'' );
-
+like( $@, qr/syntax error at \(eval 33\) line 1, near "foo''"\n/,
+           q{syntax error at (eval 33) line 1, near "foo''"\n});
 # test for ?: context error
 eval q{($a ? $x : ($y)) = 5};
 like( $@, qr/Assignment to both a list and a scalar/, 'Assignment to both a list and a scalar' );
@@ -354,10 +354,10 @@ like($@, qr/BEGIN failed--compilation aborted/, 'BEGIN 7' );
 }
 
 # [perl #113016] CORE::print::foo
-sub CORE'print'foo { 43 } # apostrophes intentional; do not tempt fate
-sub CORE'foo'bar { 43 }
+sub CORE::print::foo { 43 }
+sub CORE::foo::bar { 43 }
 is CORE::print::foo, 43, 'CORE::print::foo is not CORE::print ::foo';
-is scalar eval "CORE::foo'bar", 43, "CORE::foo'bar is not an error";
+is scalar eval "CORE::foo'bar", undef, "CORE::foo'bar is an error";
 
 # bug #71748
 eval q{
@@ -435,7 +435,7 @@ eval 's/${<<END}//';
 eval 's//${<<END}/';
 print "ok ", ++$test, " - unterminated here-docs in s/// in string eval\n";
 
-sub 'Hello'_he_said (_);
+sub ::Hello::_he_said (_);
 is prototype "Hello::_he_said", '_', 'initial tick in sub declaration';
 
 {
@@ -458,8 +458,8 @@ is $pkg, 3, '[perl #114942] for my $foo()){} $foo';
 # Check that format 'Foo still works after removing the hack from
 # force_word
 $test++;
-format 'one =
-ok @<< - format 'foo still works
+format ::one =
+ok @<< - format ::foo still works
 $test
 .
 {

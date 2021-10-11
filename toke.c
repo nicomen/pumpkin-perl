@@ -3560,7 +3560,7 @@ S_scan_const(pTHX_ char *start)
             goto default_action;
 
             /* check for embedded arrays
-             * (@foo, @::foo, @'foo, @{foo}, @$foo, @+, @-)
+             * (@foo, @::foo, @{foo}, @$foo, @+, @-)
              */
         else if (*s == '@' && s[1]) {
             if (UTF
@@ -7403,7 +7403,7 @@ yyl_just_a_word(pTHX_ char *s, STRLEN len, I32 orig_keyword, struct code c)
 
     /* Get the rest if it looks like a package qualifier */
 
-    if (*s == '\'' || (*s == ':' && s[1] == ':')) {
+    if (*s == ':' && s[1] == ':') {
         STRLEN morelen;
         s = scan_word(s, PL_tokenbuf + len, sizeof PL_tokenbuf - len,
                       TRUE, &morelen);
@@ -7414,7 +7414,7 @@ yyl_just_a_word(pTHX_ char *s, STRLEN len, I32 orig_keyword, struct code c)
         if (!morelen)
             Perl_croak(aTHX_ "Bad name after %" UTF8f "%s",
                     UTF8fARG(UTF, len, PL_tokenbuf),
-                    *s == '\'' ? "'" : "::");
+    				"::");
         len += morelen;
         pkgname = 1;
     }
@@ -8560,7 +8560,8 @@ yyl_key_core(pTHX_ char *s, STRLEN len, struct code c)
     s += 2;
     s = scan_word(s, PL_tokenbuf, sizeof PL_tokenbuf, FALSE, &len);
     if ((*s == ':' && s[1] == ':')
-        || (!(key = keyword(PL_tokenbuf, len, 1)) && *s == '\''))
+/*        || (!(key = keyword(PL_tokenbuf, len, 1)) && *s == '\'')) */
+    )
     {
         Copy(PL_bufptr, PL_tokenbuf, olen, char);
         return yyl_just_a_word(aTHX_ d, olen, 0, c);
@@ -9891,15 +9892,6 @@ S_parse_ident(pTHX_ char **s, char **d, char * const e, int allow_package,
                 *(*d)++ = *(*s)++;
             } while (isWORDCHAR_A(**s) && *d < e);
         }
-        else if (   allow_package
-                 && **s == '\''
-                 && isIDFIRST_lazy_if_safe((*s)+1, PL_bufend, is_utf8))
-        {
-            *(*d)++ = ':';
-            *(*d)++ = ':';
-            (*s)++;
-            saw_tick++;
-        }
         else if (allow_package && **s == ':' && (*s)[1] == ':'
            /* Disallow things like Foo::$bar. For the curious, this is
             * the code path that triggers the "Bad name after" warning
@@ -11039,7 +11031,7 @@ S_scan_inputsymbol(pTHX_ char *start)
     if (*d == '$' && d[1]) d++;
 
     /* allow <Pkg'VALUE> or <Pkg::VALUE> */
-    while (isWORDCHAR_lazy_if_safe(d, e, UTF) || *d == '\'' || *d == ':') {
+    while (isWORDCHAR_lazy_if_safe(d, e, UTF) || *d == ':') {
         d += UTF ? UTF8SKIP(d) : 1;
     }
 

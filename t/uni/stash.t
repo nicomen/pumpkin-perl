@@ -286,5 +286,5 @@ plan( tests => 49 );
     
     # [perl #88138] ' not equivalent to :: before a null
     ${"à'\0b"} = "c";
-    is ${"à::\0b"}, "c", "' is equivalent to :: before a null";
+    isnt ${"à::\0b"}, "c", "' is not equivalent to :: before a null anymore";
 }

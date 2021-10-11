@@ -929,11 +929,11 @@ sub run_tests {
 	like($@,
 	    qr/BEGIN failed--compilation aborted at \(eval \d+\) line \d+/,
 	    'syntax error');
-        
+
         use utf8;
         $code = '(?{Ｆｏｏ::$bar})';
         eval { "a" =~ /^a$code/ };
-        like($@, qr/Bad name after Ｆｏｏ:: at \(eval \d+\) line \d+/, 'UTF8 sytax error');
+        like($@, qr/Bad name after Ｆｏｏ:: at \(eval \d+\) line \d+/, 'UTF8 syntax error');
     }
 
     # make sure that 'use re eval' is propagated into compiling the

@@ -34,7 +34,7 @@ ok 1, "sanity check. If we got this far, UTF-8 in package names is legal.";
         $ㄅĽuṞfⳐ = 5;
     }
     
-    $압Ƈ'd읯ⱪ = 6;        #'
+    $압Ƈ::d읯ⱪ = 6;        #'
 
     $ꑭʑ = 2;
     
@@ -43,7 +43,7 @@ ok 1, "sanity check. If we got this far, UTF-8 in package names is legal.";
     
     ::is $ꑭʑ, 'bar:ニュー:ꑭʑ:압Ƈ', "comp/stash.t test 1";
     ::is $압Ƈ, "d읯ⱪ:ㄅĽuṞfⳐ", "comp/stash.t test 2";
-    ::is $main'ㄅĽuṞfⳐ, 123, "comp/stash.t test 3";
+    ::is $main::ㄅĽuṞfⳐ, 123, "comp/stash.t test 3";
 
     package 압Ƈ;
 

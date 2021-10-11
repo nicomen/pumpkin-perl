@@ -124,7 +124,7 @@ is (join(':',@{$spring2{"foo"}}), "1:2:3:4");
     is ($called, 1);
 }
 is ref eval {\&{""}}, "CODE", 'reference to &{""} [perl #94476]';
-delete $My::{"Foo::"}; 
+delete $My::{"Foo::"};
 is ref \&My::Foo::foo, "CODE",
   'creating stub with \&deleted_stash::foo [perl #128532]';
 
@@ -153,7 +153,7 @@ SKIP: {
     my $y = $$x;
     is ($y, $str, "bare REGEXP stringifies correctly");
     ok (eval { "x" =~ $y }, "bare REGEXP matches correctly");
-    
+
     my $z = \$y;
     ok (re::is_regexp($z), "new ref to REXEXP passes is_regexp");
     is ($z, $str, "new ref to REGEXP stringifies correctly");
@@ -227,7 +227,7 @@ for (
     [ 'ref',            REF     => \\1                  ],
     [ 'substr lvalue',  LVALUE  => \substr($x, 0, 0)    ],
     [ 'pos lvalue',     LVALUE  => \pos                 ],
-    [ 'vec lvalue',     LVALUE  => \vec($x,0,1)         ],     
+    [ 'vec lvalue',     LVALUE  => \vec($x,0,1)         ],
     [ 'named array',    ARRAY   => \@ary                ],
     [ 'anon array',     ARRAY   => [ 1 ]                ],
     [ 'named hash',     HASH    => \%whatever           ],
@@ -266,7 +266,7 @@ is (join('', sort values %$anonhash2), 'BARXYZ');
 
 package MYHASH;
 
-$object = bless $main'anonhash2;
+$object = bless $main::anonhash2;
 main::is (ref $object, 'MYHASH');
 main::is ($object->{ABC}, 'XYZ');
 
@@ -290,7 +290,7 @@ sub mymethod {
 $string = "bad";
 $object = "foo";
 $string = "good";
-$main'anonhash2 = "foo";
+$main::anonhash2 = "foo";
 $string = "";
 
 DESTROY {
@@ -307,7 +307,7 @@ package OBJ;
 
 @ISA = ('BASEOBJ');
 
-$main'object = bless {FOO => 'foo', BAR => 'bar'};
+$main::object = bless {FOO => 'foo', BAR => 'bar'};
 
 package main;
 
@@ -320,7 +320,7 @@ is ($object->doit("BAR"), 'bar');
 $foo = doit $object "FOO";
 main::is ($foo, 'foo');
 
-sub BASEOBJ'doit {
+sub BASEOBJ::doit {
     local $ref = shift;
     die "Not an OBJ" unless ref $ref eq 'OBJ';
     $ref->{shift()};

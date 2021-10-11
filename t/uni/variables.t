@@ -35,7 +35,7 @@ plan (tests => 66880);
         );
 }
 
-# ${yadda'etc} and ${yadda::etc} should both work under strict
+# ${yadda::etc} should work under strict, ${fleem'flark} shouldn't
 {
     local $@;
     eval q<use strict; ${flark::fleem}>;
@@ -43,7 +43,7 @@ plan (tests => 66880);
 
     local $@;
     eval q<use strict; ${fleem'flark}>;
-    is($@, '', q<...as does ${package'var}>);
+    is($@, q{Can't find string terminator "'" anywhere before EOF at (eval 16) line 1.\n}, q<...as does ${package'var}>);
 }
 
 # The first character in ${...} should respect the rules

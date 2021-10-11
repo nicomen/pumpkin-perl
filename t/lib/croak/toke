@@ -307,6 +307,13 @@ Bareword found where operator expected at - line 9, near "isa => 'Int"
   (Might be a runaway multi-line '' string starting on line 4)
 	(Do you need to predeclare isa?)
 Bad name after Int' at - line 9.
+String found where operator expected at - line 10, near "is => '"
+  (Might be a runaway multi-line '' string starting on line 9)
+	(Missing semicolon on previous line?)
+Bareword found where operator expected at - line 10, near "is => 'ro"
+	(Do you need to predeclare is?)
+syntax error at - line 9, near "isa => 'Int"
+Can't find string terminator "'" anywhere before EOF at - line 10.
 ########
 # NAME Bad name after :: (with other helpful messages)
 sub has{}
