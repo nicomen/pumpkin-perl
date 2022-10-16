@@ -731,10 +731,10 @@ $foo{'exit'};
 print "overshot main\n"; # shouldn't reach here
 
 EXPECT
-eval: s0=EVAL-BD-BS-E1-S1-E2-S2-S2-S2-S2-S2-S2-S2-S2-S2-S2-R
-eval: s1=EVAL-BD-BS-E1-S1-E2-S2-S2-S2-S2-S2-S2-S2-S2-S2-S2-R
-eval: s2=EVAL-BD-BS-E1-S1-E2-S2-S2-S2-S2-S2-S2-S2-S2-S2-S2-R
-eval: s3=EVAL-BD-BS-E1-S1-E2-S2-S2-S2-S2-S2-S2-S2-S2-S2-S2-R
+eval: s0=EVAL-BD-BS-E1-S1-E2-S2-R
+eval: s1=EVAL-BD-BS-E1-S1-E2-S2-R
+eval: s2=EVAL-BD-BS-E1-S1-E2-S2-R
+eval: s3=EVAL-BD-BS-E1-S1-E2-S2-R
 require: s0=REQUIRE-0-ERQ-ENDRQ-1-ERQ-ENDRQ-2-ERQ-ENDRQ-3-ERQ-ENDRQ-R
 require: s1=REQUIRE-0-RQ
 require: s2=REQUIRE-0-ERQ-ENDRQ-1-ERQ-ENDRQ-2-ERQ-ENDRQ-3-ERQ-ENDRQ-R
@@ -996,7 +996,8 @@ EXPECT
 #
 # [perl #86328] Crash when freeing tie magic that can increment the refcnt
 
-eval { require Scalar::Util } or print("ok\n"), exit;
+no warnings 'experimental::builtin';
+use builtin 'weaken';
 
 sub TIEHASH {
     return $_[1];
@@ -1010,12 +1011,12 @@ sub DESTROY {
 
 my $a = {};
 my $o = bless [];
-Scalar::Util::weaken($o->[0] = $a);
+weaken($o->[0] = $a);
 tie %$a, "main", $o;
 
 my $b = [];
 my $p = bless [];
-Scalar::Util::weaken($p->[0] = $b);
+weaken($p->[0] = $b);
 tie @$b, "main", $p;
 
 # Done setting up the evil data structures
@@ -1189,9 +1190,10 @@ EXPECT
 BEGIN { unless (defined &DynaLoader::boot_DynaLoader) {
     print "HASH\nHASH\nARRAY\nARRAY\n"; exit;
 }}
-use Scalar::Util 'weaken';
+no warnings 'experimental::builtin';
+use builtin 'weaken';
 { package xoufghd;
-  sub TIEHASH { Scalar::Util::weaken($_[1]); bless \$_[1], xoufghd:: }
+  sub TIEHASH { weaken($_[1]); bless \$_[1], xoufghd:: }
   *TIEARRAY = *TIEHASH;
   DESTROY {
      bless ${$_[0]} || return, 0;

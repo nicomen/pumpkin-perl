@@ -703,8 +703,8 @@ walkoptree_debug(...)
     CODE:
 	dMY_CXT;
 	RETVAL = walkoptree_debug;
-	if (items > 0 && SvTRUE(ST(1)))
-	    walkoptree_debug = 1;
+	if (items > 0)
+	    walkoptree_debug = SvTRUE(ST(0));
     OUTPUT:
 	RETVAL
 
@@ -1072,13 +1072,13 @@ next(o)
                  */
 		ret = make_op_object(aTHX_
                             o->op_type == OP_METHOD
-                                ? cMETHOPx(o)->op_u.op_first : NULL);
+                                ? cMETHOPo->op_u.op_first : NULL);
 		break;
 	    case 54: /* B::METHOP::meth_sv */
                 /* see comment above about METHOP */
 		ret = make_sv_object(aTHX_
                             o->op_type == OP_METHOD
-                                ? NULL : cMETHOPx(o)->op_u.op_meth_sv);
+                                ? NULL : cMETHOPo->op_u.op_meth_sv);
 		break;
 	    case 55: /* B::PMOP::pmregexp */
 		ret = make_sv_object(aTHX_ (SV *)PM_GETRE(cPMOPo));
@@ -1088,13 +1088,13 @@ next(o)
 		ret = sv_2mortal(newSVuv(
 		    (o->op_type == OP_METHOD_REDIR ||
 		     o->op_type == OP_METHOD_REDIR_SUPER) ?
-		      cMETHOPx(o)->op_rclass_targ : 0
+		      cMETHOPo->op_rclass_targ : 0
 		));
 #else
 		ret = make_sv_object(aTHX_
 		    (o->op_type == OP_METHOD_REDIR ||
 		     o->op_type == OP_METHOD_REDIR_SUPER) ?
-		      cMETHOPx(o)->op_rclass_sv : NULL
+		      cMETHOPo->op_rclass_sv : NULL
 		);
 #endif
 		break;
@@ -1398,12 +1398,12 @@ aux_list(o, cv)
 
 
 
-MODULE = B	PACKAGE = B::SV
+MODULE = B	PACKAGE = B::SV         PREFIX = Sv
 
 #define MAGICAL_FLAG_BITS (SVs_GMG|SVs_SMG|SVs_RMG)
 
 U32
-REFCNT(sv)
+SvREFCNT(sv)
 	B::SV	sv
     ALIAS:
 	FLAGS = 0xFFFFFFFF
@@ -1417,11 +1417,23 @@ REFCNT(sv)
 	RETVAL
 
 void
-object_2svref(sv)
+Svobject_2svref(sv)
 	B::SV	sv
     PPCODE:
 	ST(0) = sv_2mortal(newRV(sv));
 	XSRETURN(1);
+
+bool
+SvIsBOOL(sv)
+    B::SV   sv
+
+bool
+SvTRUE(sv)
+    B::SV   sv
+
+bool
+SvTRUE_nomg(sv)
+    B::SV   sv
 	
 MODULE = B	PACKAGE = B::IV		PREFIX = Sv
 
@@ -2252,13 +2264,14 @@ MODULE = B	PACKAGE = B::PADNAME	PREFIX = Padname
 	sv_U32p | STRUCT_OFFSET(struct padname, xpadn_low)
 #define PN_cop_seq_range_high_ix \
 	sv_U32p | STRUCT_OFFSET(struct padname, xpadn_high)
+#define PN_xpadn_gen_ix \
+	sv_I32p | STRUCT_OFFSET(struct padname, xpadn_gen)
 #define PNL_refcnt_ix \
 	sv_U32p | STRUCT_OFFSET(struct padnamelist, xpadnl_refcnt)
 #define PL_id_ix \
 	sv_U32p | STRUCT_OFFSET(struct padlist, xpadl_id)
 #define PL_outid_ix \
 	sv_U32p | STRUCT_OFFSET(struct padlist, xpadl_outid)
-
 
 void
 PadnameTYPE(pn)
@@ -2270,6 +2283,7 @@ PadnameTYPE(pn)
 	B::PADNAME::REFCNT	= PN_refcnt_ix
 	B::PADNAME::COP_SEQ_RANGE_LOW	 = PN_cop_seq_range_low_ix
 	B::PADNAME::COP_SEQ_RANGE_HIGH	 = PN_cop_seq_range_high_ix
+	B::PADNAME::GEN		= PN_xpadn_gen_ix
 	B::PADNAMELIST::REFCNT	= PNL_refcnt_ix
 	B::PADLIST::id		= PL_id_ix
 	B::PADLIST::outid	= PL_outid_ix
@@ -2305,6 +2319,14 @@ PadnamePV(pn)
 	SvUTF8_on(TARG);
 	XPUSHTARG;
 
+bool
+PadnameIsUndef(padn)
+       B::PADNAME      padn
+    CODE:
+        RETVAL = padn == &PL_padname_undef;
+    OUTPUT:
+       RETVAL
+
 BOOT:
 {
     /* Uses less memory than an ALIAS.  */
@@ -2329,7 +2351,7 @@ PadnameFLAGS(pn)
 	RETVAL = PadnameFLAGS(pn);
 	/* backward-compatibility hack, which should be removed if the
 	   flags field becomes large enough to hold SVf_FAKE (and
-	   PADNAMEt_OUTER should be renumbered to match SVf_FAKE) */
+	   PADNAMEf_OUTER should be renumbered to match SVf_FAKE) */
 	STATIC_ASSERT_STMT(SVf_FAKE >= 1<<(sizeof(PadnameFLAGS((B__PADNAME)NULL)) * 8));
 	if (PadnameOUTER(pn))
 	    RETVAL |= SVf_FAKE;

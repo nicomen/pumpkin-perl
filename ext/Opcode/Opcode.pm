@@ -1,31 +1,21 @@
-package Opcode;
-
-use 5.006_001;
+package Opcode 1.61;
 
 use strict;
-
-our($VERSION, @ISA, @EXPORT_OK);
-
-$VERSION = "1.54";
 
 use Carp;
 use Exporter 'import';
 use XSLoader;
 
-BEGIN {
-    @EXPORT_OK = qw(
+sub opset (;@);
+sub opset_to_hex ($);
+sub opdump (;$);
+use subs our @EXPORT_OK = qw(
 	opset ops_to_opset
 	opset_to_ops opset_to_hex invert_opset
 	empty_opset full_opset
 	opdesc opcodes opmask define_optag
 	opmask_add verify_opset opdump
-    );
-}
-
-sub opset (;@);
-sub opset_to_hex ($);
-sub opdump (;$);
-use subs @EXPORT_OK;
+);
 
 XSLoader::load();
 
@@ -312,10 +302,10 @@ invert_opset function.
 
     null stub scalar pushmark wantarray const defined undef
 
-    rv2sv sassign
+    rv2sv sassign padsv_store
 
     rv2av aassign aelem aelemfast aelemfast_lex aslice kvaslice
-    av2arylen
+    av2arylen aelemfastlex_store
 
     rv2hv helem hslice kvhslice each values keys exists delete
     aeach akeys avalues multideref argelem argdefelem argcheck
@@ -352,6 +342,9 @@ invert_opset function.
      -- XXX loops via recursion?
 
     cmpchain_and cmpchain_dup
+
+    is_bool
+    is_weak weaken unweaken
 
     leaveeval -- needed for Safe to operate, is safe
 		 without entereval
@@ -414,6 +407,7 @@ These are a hotchpotch of opcodes still waiting to be considered
     once
 
     rv2gv refgen srefgen ref refassign lvref lvrefslice lvavref
+    blessed refaddr reftype
 
     bless -- could be used to change ownership of objects
 	     (reblessing)
@@ -444,6 +438,10 @@ These are a hotchpotch of opcodes still waiting to be considered
     pushdefer
 
     custom -- where should this go
+
+    ceil floor
+
+    is_tainted
 
 =item :base_math
 
@@ -612,4 +610,3 @@ Split out from Safe module version 1, named opcode tags and other
 changes added by Tim Bunce.
 
 =cut
-

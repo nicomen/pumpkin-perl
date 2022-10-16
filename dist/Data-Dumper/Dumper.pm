@@ -18,6 +18,7 @@ use 5.008_001;
 require Exporter;
 
 use constant IS_PRE_516_PERL => $] < 5.016;
+use constant SUPPORTS_CORE_BOOLS => defined &builtin::is_bool;
 
 use Carp ();
 
@@ -29,7 +30,7 @@ our ( $Indent, $Trailingcomma, $Purity, $Pad, $Varname, $Useqq, $Terse, $Freezer
 our ( @ISA, @EXPORT, @EXPORT_OK, $VERSION );
 
 BEGIN {
-    $VERSION = '2.183'; # Don't forget to set version and release
+    $VERSION = '2.186'; # Don't forget to set version and release
                         # date in POD below!
 
     @ISA = qw(Exporter);
@@ -551,6 +552,12 @@ sub _dump {
     elsif (!defined($val)) {
       $out .= "undef";
     }
+    elsif (SUPPORTS_CORE_BOOLS && do {
+      BEGIN { SUPPORTS_CORE_BOOLS and warnings->unimport("experimental::builtin") }
+      builtin::is_bool($val)
+    }) {
+      $out .= $val ? '!!1' : '!!0';
+    }
     # This calls the XSUB _vstring (if the XS code is loaded). I'm not *sure* if
     # if belongs in the "Pure Perl" implementation. It sort of depends on what
     # was meant by "Pure Perl", as this subroutine already relies Scalar::Util
@@ -740,15 +747,15 @@ my %esc = (
     "\e" => "\\e",
 );
 
-my $low_controls = ($IS_ASCII)
-
-                   # This includes \177, because traditionally it has been
-                   # output as octal, even though it isn't really a "low"
-                   # control
-                   ? qr/[\0-\x1f\177]/
-
-                     # EBCDIC low controls.
-                   : qr/[\0-\x3f]/;
+# The low controls are considered to be everything below SPACE, plus the
+# outlier \c? control (but that wasn't properly in existence in early perls,
+# so reconstruct its value here.  This abandons EBCDIC support for this
+# character for perls below 5.8)
+my $low_controls = join "", map { quotemeta chr $_ } 0.. (ord(" ") - 1);
+$low_controls .= ($] < 5.008 || $IS_ASCII)
+                 ? "\x7f"
+                 : chr utf8::unicode_to_native(0x9F);
+my $low_controls_re = qr/[$low_controls]/;
 
 # put a string value in double quotes
 sub qquote {
@@ -758,19 +765,10 @@ sub qquote {
   # This efficiently changes the high ordinal characters to \x{} if the utf8
   # flag is on.  On ASCII platforms, the high ordinals are all the
   # non-ASCII's.  On EBCDIC platforms, we don't include in these the non-ASCII
-  # controls whose ordinals are less than SPACE, excluded below by the range
-  # \0-\x3f.  On ASCII platforms this range just compiles as part of :ascii:.
-  # On EBCDIC platforms, there is just one outlier high ordinal control, and
-  # it gets output as \x{}.
+  # controls.
   my $bytes; { use bytes; $bytes = length }
-  s/([^[:ascii:]\0-\x3f])/sprintf("\\x{%x}",ord($1))/ge
-    if $bytes > length
-
-       # The above doesn't get the EBCDIC outlier high ordinal control when
-       # the string is UTF-8 but there are no UTF-8 variant characters in it.
-       # We want that to come out as \x{} anyway.  We need is_utf8() to do
-       # this.
-       || (! $IS_ASCII && utf8::is_utf8($_));
+  s/([^[:ascii:]$low_controls])/sprintf("\\x{%x}",ord($1))/ge
+    if $bytes > length;
 
   return qq("$_") unless /[[:^print:]]/;  # fast exit if only printables
 
@@ -779,21 +777,17 @@ sub qquote {
   s/([\a\b\t\n\f\r\e])/$esc{$1}/g;
 
   # no need for 3 digits in escape for octals not followed by a digit.
-  s/($low_controls)(?!\d)/'\\'.sprintf('%o',ord($1))/eg;
+  s/($low_controls_re)(?!\d)/'\\'.sprintf('%o',ord($1))/eg;
 
   # But otherwise use 3 digits
-  s/($low_controls)/'\\'.sprintf('%03o',ord($1))/eg;
+  s/($low_controls_re)/'\\'.sprintf('%03o',ord($1))/eg;
 
     # all but last branch below not supported --BEHAVIOR SUBJECT TO CHANGE--
   my $high = shift || "";
     if ($high eq "iso8859") {   # Doesn't escape the Latin1 printables
-      if ($IS_ASCII) {
-        s/([\200-\240])/'\\'.sprintf('%o',ord($1))/eg;
-      }
-      else {
-        my $high_control = utf8::unicode_to_native(0x9F);
-        s/$high_control/sprintf('\\%o',ord($1))/eg;
-      }
+      # Could use /u and [:cntrl:] etc, if khw were confident it worked in
+      # early early perls
+      s/([\200-\240])/'\\'.sprintf('%o',ord($1))/eg if $IS_ASCII;
     } elsif ($high eq "utf8") {
 #     Some discussion of what to do here is in
 #       https://rt.perl.org/Ticket/Display.html?id=113088
@@ -897,7 +891,7 @@ to substructures within C<$VAR>I<n> will be appropriately labeled using arrow
 notation.  You can specify names for individual values to be dumped if you
 use the C<Dump()> method, or you can change the default C<$VAR> prefix to
 something else.  See C<$Data::Dumper::Varname> and C<$Data::Dumper::Terse>
-below.
+in L</Configuration Variables or Methods> below.
 
 The default output of self-referential structures can be C<eval>ed, but the
 nested references to C<$VAR>I<n> will be undefined, since a recursive
@@ -1461,7 +1455,7 @@ modify it under the same terms as Perl itself.
 
 =head1 VERSION
 
-Version 2.183
+Version 2.186
 
 =head1 SEE ALSO
 

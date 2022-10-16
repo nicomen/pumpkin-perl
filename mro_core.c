@@ -102,6 +102,15 @@ Perl_mro_set_private_data(pTHX_ struct mro_meta *const smeta,
     return data;
 }
 
+/*
+=for apidoc mro_get_from_name
+
+Returns the previously registered mro with the given C<name>, or NULL if not
+registered.  See L</C<mro_register>>.
+
+=cut
+*/
+
 const struct mro_alg *
 Perl_mro_get_from_name(pTHX_ SV *name) {
     SV **data;
@@ -255,11 +264,11 @@ S_mro_get_linear_isa_dfs(pTHX_ HV *stash, U32 level)
 
     /* not in cache, make a new one */
 
-    retval = MUTABLE_AV(sv_2mortal(MUTABLE_SV(newAV())));
+    retval = MUTABLE_AV(newSV_type_mortal(SVt_PVAV));
     /* We use this later in this function, but don't need a reference to it
        beyond the end of this function, so reference count is fine.  */
     our_name = newSVhek(stashhek);
-    av_push(retval, our_name); /* add ourselves at the top */
+    av_push_simple(retval, our_name); /* add ourselves at the top */
 
     /* fetch our @ISA */
     gvp = (GV**)hv_fetchs(stash, "ISA", FALSE);
@@ -317,7 +326,7 @@ S_mro_get_linear_isa_dfs(pTHX_ HV *stash, U32 level)
 
                         HeVAL(he) = &PL_sv_undef;
                         sv_sethek(val, key);
-                        av_push(retval, val);
+                        av_push_simple(retval, val);
                     }
                 }
             } else {
@@ -347,9 +356,9 @@ S_mro_get_linear_isa_dfs(pTHX_ HV *stash, U32 level)
                 } else {
                     /* They have no stash.  So create ourselves an ->isa cache
                        as if we'd copied it from what theirs should be.  */
-                    stored = MUTABLE_HV(sv_2mortal(MUTABLE_SV(newHV())));
+                    stored = MUTABLE_HV(newSV_type_mortal(SVt_PVHV));
                     (void) hv_stores(stored, "UNIVERSAL", &PL_sv_undef);
-                    av_push(retval,
+                    av_push_simple(retval,
                             newSVhek(HeKEY_hek(hv_store_ent(stored, sv,
                                                             &PL_sv_undef, 0))));
                 }
@@ -357,7 +366,7 @@ S_mro_get_linear_isa_dfs(pTHX_ HV *stash, U32 level)
         }
     } else {
         /* We have no parents.  */
-        stored = MUTABLE_HV(sv_2mortal(MUTABLE_SV(newHV())));
+        stored = MUTABLE_HV(newSV_type_mortal(SVt_PVHV));
         (void) hv_stores(stored, "UNIVERSAL", &PL_sv_undef);
     }
 
@@ -406,7 +415,7 @@ Perl_mro_get_linear_isa(pTHX_ HV *stash)
     AV *isa;
 
     PERL_ARGS_ASSERT_MRO_GET_LINEAR_ISA;
-    if(!SvOOK(stash))
+    if(!HvHasAUX(stash))
         Perl_croak(aTHX_ "Can't linearize anonymous symbol table");
 
     meta = HvMROMETA(stash);
@@ -428,7 +437,7 @@ Perl_mro_get_linear_isa(pTHX_ HV *stash)
             SV **svp;
             SV **ovp = AvARRAY(old);
             SV * const * const oend = ovp + AvFILLp(old) + 1;
-            isa = (AV *)sv_2mortal((SV *)newAV());
+            isa = (AV *)newSV_type_mortal(SVt_PVAV);
             av_extend(isa, AvFILLp(isa) = AvFILLp(old)+1);
             *AvARRAY(isa) = namesv;
             svp = AvARRAY(isa)+1;
@@ -570,7 +579,7 @@ Perl_mro_isa_changed_in(pTHX_ HV* stash)
         if(hv_iterinit(isarev)) {
             /* Only create the hash if we need it; i.e., if isarev has
                any elements. */
-            isa_hashes = (HV *)sv_2mortal((SV *)newHV());
+            isa_hashes = (HV *)newSV_type_mortal(SVt_PVHV);
         }
         while((iter = hv_iternext(isarev))) {
             HV* revstash = gv_stashsv(hv_iterkeysv(iter), 0);
@@ -783,7 +792,7 @@ Perl_mro_package_moved(pTHX_ HV * const stash, HV * const oldstash,
          *svp != (SV *)gv
         ) return;
     }
-    assert(SvOOK(GvSTASH(gv)));
+    assert(HvHasAUX(GvSTASH(gv)));
     assert(GvNAMELEN(gv));
     assert(GvNAME(gv)[GvNAMELEN(gv) - 1] == ':');
     assert(GvNAMELEN(gv) == 1 || GvNAME(gv)[GvNAMELEN(gv) - 2] == ':');
@@ -803,7 +812,7 @@ Perl_mro_package_moved(pTHX_ HV * const stash, HV * const oldstash,
                 : newSVpvs_flags("",  SVs_TEMP);
         }
         else {
-            namesv = sv_2mortal(newSVhek(*namep));
+            namesv = newSVhek_mortal(*namep);
             if (GvNAMELEN(gv) == 1) sv_catpvs(namesv, ":");
             else                    sv_catpvs(namesv, "::");
         }
@@ -817,7 +826,7 @@ Perl_mro_package_moved(pTHX_ HV * const stash, HV * const oldstash,
     }
     else {
         SV *aname;
-        namesv = sv_2mortal((SV *)newAV());
+        namesv = newSV_type_mortal(SVt_PVAV);
         while (name_count--) {
             if(memEQs(HEK_KEY(*namep), HEK_LEN(*namep), "main")){
                 aname = GvNAMELEN(gv) == 1
@@ -837,7 +846,7 @@ Perl_mro_package_moved(pTHX_ HV * const stash, HV * const oldstash,
                     GvNAMEUTF8(gv) ? SV_CATUTF8 : SV_CATBYTES
                 );
             }
-            av_push((AV *)namesv, aname);
+            av_push_simple((AV *)namesv, aname);
         }
     }
 
@@ -854,9 +863,9 @@ Perl_mro_package_moved(pTHX_ HV * const stash, HV * const oldstash,
        wrong name. The names must be set on *all* affected stashes before
        we do anything else. (And linearisations must be cleared, too.)
      */
-    stashes = (HV *) sv_2mortal((SV *)newHV());
+    stashes = (HV *) newSV_type_mortal(SVt_PVHV);
     mro_gather_and_rename(
-     stashes, (HV *) sv_2mortal((SV *)newHV()),
+     stashes, (HV *) newSV_type_mortal(SVt_PVHV),
      stash, oldstash, namesv
     );
 
@@ -1119,7 +1128,7 @@ S_mro_gather_and_rename(pTHX_ HV * const stashes, HV * const seen_stashes,
     /* Skip the entire loop if the hash is empty.   */
     if(oldstash && HvTOTALKEYS(oldstash)) {
         xhv = (XPVHV*)SvANY(oldstash);
-        seen = (HV *) sv_2mortal((SV *)newHV());
+        seen = (HV *) newSV_type_mortal(SVt_PVHV);
 
         /* Iterate through entries in the oldstash, adding them to the
            list, meanwhile doing the equivalent of $seen{$key} = 1.
@@ -1164,7 +1173,7 @@ S_mro_gather_and_rename(pTHX_ HV * const stashes, HV * const seen_stashes,
                             SV *aname;
                             items = AvFILLp((AV *)namesv) + 1;
                             svp = AvARRAY((AV *)namesv);
-                            subname = sv_2mortal((SV *)newAV());
+                            subname = newSV_type_mortal(SVt_PVAV);
                             while (items--) {
                                 aname = newSVsv(*svp++);
                                 if (len == 1)
@@ -1177,7 +1186,7 @@ S_mro_gather_and_rename(pTHX_ HV * const stashes, HV * const seen_stashes,
                                            ? SV_CATUTF8 : SV_CATBYTES
                                     );
                                 }
-                                av_push((AV *)subname, aname);
+                                av_push_simple((AV *)subname, aname);
                             }
                         }
                         else {
@@ -1247,7 +1256,7 @@ S_mro_gather_and_rename(pTHX_ HV * const stashes, HV * const seen_stashes,
                             SV *aname;
                             items = AvFILLp((AV *)namesv) + 1;
                             svp = AvARRAY((AV *)namesv);
-                            subname = sv_2mortal((SV *)newAV());
+                            subname = newSV_type_mortal(SVt_PVAV);
                             while (items--) {
                                 aname = newSVsv(*svp++);
                                 if (len == 1)
@@ -1260,7 +1269,7 @@ S_mro_gather_and_rename(pTHX_ HV * const stashes, HV * const seen_stashes,
                                            ? SV_CATUTF8 : SV_CATBYTES
                                     );
                                 }
-                                av_push((AV *)subname, aname);
+                                av_push_simple((AV *)subname, aname);
                             }
                         }
                         else {
@@ -1368,6 +1377,17 @@ Perl_mro_method_changed_in(pTHX_ HV *stash)
     /* pessimise derefs for now. Will get recalculated by Gv_AMupdate() */
     HvAUX(stash)->xhv_aux_flags &= ~HvAUXf_NO_DEREF;
 }
+
+/*
+=for apidoc mro_set_mro
+
+Set C<meta> to the value contained in the registered mro plugin whose name is
+C<name>.
+
+Croaks if C<name> hasn't been registered
+
+=cut
+*/
 
 void
 Perl_mro_set_mro(pTHX_ struct mro_meta *const meta, SV *const name)

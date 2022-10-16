@@ -17,10 +17,8 @@ BEGIN {
     if ($^O eq 'dec_osf') {
       skip_all("$^O cannot handle this test");
     }
-    my $time_out_factor = $ENV{PERL_TEST_TIME_OUT_FACTOR} || 1;
-    $time_out_factor = 1 if $time_out_factor < 1;
 
-    watchdog(5 * 60 * $time_out_factor);
+    watchdog(5 * 60);
     require './loc_tools.pl';
 }
 
@@ -41,6 +39,8 @@ if ($charset eq 'T') {
     $charset = 'L';
     $use_turkic_rules = 1;
 }
+
+my $has_LC_CTYPE = is_category_valid('LC_CTYPE');
 
 # Special-cased characters in the .c's that we want to make sure get tested.
 my %be_sure_to_test = (
@@ -591,7 +591,9 @@ foreach my $test (sort { numerically } keys %{$tests_ref}) {
     # Now grind out tests, using various combinations.
     {
       my $charset_mod = lc $charset;
-      my $current_locale = setlocale(&POSIX::LC_CTYPE);
+      my $current_locale = ($has_LC_CTYPE)
+                           ? setlocale(&POSIX::LC_CTYPE)
+                           : 'C';
       $current_locale = 'C locale' if $current_locale eq 'C';
       $okays = 0;
       $this_iteration = 0;

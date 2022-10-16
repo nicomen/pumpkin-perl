@@ -33,7 +33,7 @@ struct jmpenv {
     struct jmpenv *	je_prev;
     Sigjmp_buf		je_buf;		/* uninit if je_prev is NULL */
     int			je_ret;		/* last exception thrown */
-    bool		je_mustcatch;	/* need to call longjmp()? */
+    bool		je_mustcatch;	/* longjmp()s must be caught locally */
     U16                 je_old_delaymagic; /* saved PL_delaymagic */
     SSize_t             je_old_stack_hwm;
 };
@@ -110,30 +110,47 @@ typedef struct jmpenv JMPENV;
 
 #define dJMPENV		JMPENV cur_env
 
-#define JMPENV_PUSH(v) \
+#define JMPENV_PUSH(v)                                                  \
     STMT_START {							\
-        DEBUG_l({							\
-            int i = 0; JMPENV *p = PL_top_env;				\
+        DEBUG_l({                                                       \
+            int i = 0;                                                  \
+            JMPENV *p = PL_top_env;                                     \
             while (p) { i++; p = p->je_prev; }				\
-            Perl_deb(aTHX_ "JUMPENV_PUSH level=%d at %s:%d\n",		\
-                         i,  __FILE__, __LINE__);})			\
+            Perl_deb(aTHX_ "JMPENV_PUSH pre level=%d in %s at %s:%d\n", \
+                         i,  SAFE_FUNCTION__, __FILE__, __LINE__);      \
+        });                                                             \
         cur_env.je_prev = PL_top_env;					\
         JE_OLD_STACK_HWM_save(cur_env);                                 \
-        cur_env.je_ret = PerlProc_setjmp(cur_env.je_buf, SCOPE_SAVES_SIGNAL_MASK);		\
+        /* setjmp() is callable in limited contexts which does not */	\
+        /* include assignment, so switch() instead */			\
+        switch (PerlProc_setjmp(cur_env.je_buf, SCOPE_SAVES_SIGNAL_MASK)) { \
+        case 0: cur_env.je_ret = 0; break;				\
+        case 1: cur_env.je_ret = 1; break;				\
+        case 2: cur_env.je_ret = 2; break;				\
+        case 3: cur_env.je_ret = 3; break;				\
+        default: Perl_croak(aTHX_ "panic: unexpected setjmp() result\n"); \
+        }								\
         JE_OLD_STACK_HWM_restore(cur_env);                              \
         PL_top_env = &cur_env;						\
         cur_env.je_mustcatch = FALSE;					\
         cur_env.je_old_delaymagic = PL_delaymagic;			\
+        DEBUG_l({                                                       \
+            int i = 0;                                                  \
+            JMPENV *p = PL_top_env;                                     \
+            while (p) { i++; p = p->je_prev; }				\
+            Perl_deb(aTHX_ "JMPENV_PUSH level=%d ret=%d in %s at %s:%d\n",    \
+                         i, cur_env.je_ret, SAFE_FUNCTION__,  __FILE__, __LINE__); \
+        });                                                             \
         (v) = cur_env.je_ret;						\
     } STMT_END
 
 #define JMPENV_POP \
     STMT_START {							\
-        DEBUG_l({							\
+        DEBUG_l({                                                       \
             int i = -1; JMPENV *p = PL_top_env;				\
             while (p) { i++; p = p->je_prev; }				\
-            Perl_deb(aTHX_ "JUMPENV_POP level=%d at %s:%d\n",		\
-                         i, __FILE__, __LINE__);})			\
+            Perl_deb(aTHX_ "JMPENV_POP level=%d in %s at %s:%d\n",        \
+                         i, SAFE_FUNCTION__, __FILE__, __LINE__);})        \
         assert(PL_top_env == &cur_env);					\
         PL_delaymagic = cur_env.je_old_delaymagic;			\
         PL_top_env = cur_env.je_prev;					\
@@ -141,27 +158,29 @@ typedef struct jmpenv JMPENV;
 
 #define JMPENV_JUMP(v) \
     STMT_START {						\
-        DEBUG_l({						\
+        DEBUG_l({                                               \
             int i = -1; JMPENV *p = PL_top_env;			\
             while (p) { i++; p = p->je_prev; }			\
-            Perl_deb(aTHX_ "JUMPENV_JUMP(%d) level=%d at %s:%d\n", \
-                         (int)v, i, __FILE__, __LINE__);})	\
-        if (PL_top_env->je_prev)				\
+            Perl_deb(aTHX_ "JMPENV_JUMP(%d) level=%d in %s at %s:%d\n",         \
+                         (int)(v), i, SAFE_FUNCTION__, __FILE__, __LINE__);})   \
+        if (PL_top_env->je_prev) {				\
+            assert((v) >= 0 && (v) <= 3);			\
             PerlProc_longjmp(PL_top_env->je_buf, (v));		\
+        }    							\
         if ((v) == 2)						\
             PerlProc_exit(STATUS_EXIT);		                \
-        PerlIO_printf(PerlIO_stderr(), "panic: top_env, v=%d\n", (int)v); \
+        PerlIO_printf(PerlIO_stderr(), "panic: top_env, v=%d\n", (int)(v)); \
         PerlProc_exit(1);					\
     } STMT_END
 
 #define CATCH_GET		(PL_top_env->je_mustcatch)
 #define CATCH_SET(v) \
     STMT_START {							\
-        DEBUG_l(							\
+        DEBUG_l(                                                        \
             Perl_deb(aTHX_						\
-                "JUMPLEVEL set catch %d => %d (for %p) at %s:%d\n",	\
-                 PL_top_env->je_mustcatch, v, (void*)PL_top_env,	\
-                 __FILE__, __LINE__);)					\
+                "JUMPLEVEL set catch %d => %d (for %p) in %s at %s:%d\n",   \
+                 PL_top_env->je_mustcatch, (v), (void*)PL_top_env,      \
+                 SAFE_FUNCTION__, __FILE__, __LINE__);)			\
         PL_top_env->je_mustcatch = (v);					\
     } STMT_END
 
@@ -175,108 +194,92 @@ typedef struct refcounted_he COPHH;
 #define COPHH_EXISTS REFCOUNTED_HE_EXISTS
 
 /*
-=for apidoc Amx|SV *|cophh_fetch_pvn|const COPHH *cophh|const char *keypv|STRLEN keylen|U32 hash|U32 flags
+=for apidoc  Amx|SV *|cophh_fetch_pv |const COPHH *cophh|const char *key              |U32 hash|U32 flags
+=for apidoc_item|SV *|cophh_fetch_pvn|const COPHH *cophh|const char *key|STRLEN keylen|U32 hash|U32 flags
+=for apidoc_item|SV *|cophh_fetch_pvs|const COPHH *cophh|           "key"                      |U32 flags
+=for apidoc_item|SV *|cophh_fetch_sv |const COPHH *cophh|        SV *key              |U32 hash|U32 flags
 
-Look up the entry in the cop hints hash C<cophh> with the key specified by
-C<keypv> and C<keylen>.  If C<flags> has the C<COPHH_KEY_UTF8> bit set,
-the key octets are interpreted as UTF-8, otherwise they are interpreted
-as Latin-1.  C<hash> is a precomputed hash of the key string, or zero if
-it has not been precomputed.  Returns a mortal scalar copy of the value
-associated with the key, or C<&PL_sv_placeholder> if there is no value
-associated with the key.
+These look up the entry in the cop hints hash C<cophh> with the key specified by
+C<key> (and C<keylen> in the C<pvn> form), returning that value as a mortal
+scalar copy, or C<&PL_sv_placeholder> if there is no value associated with the
+key.
+
+The forms differ in how the key is specified.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =for apidoc Amnh||COPHH_KEY_UTF8
 
 =cut
+
 */
 
-#define cophh_fetch_pvn(cophh, keypv, keylen, hash, flags) \
-    Perl_refcounted_he_fetch_pvn(aTHX_ cophh, keypv, keylen, hash, flags)
+#define cophh_fetch_pvn(cophh, key, keylen, hash, flags)                    \
+    Perl_refcounted_he_fetch_pvn(aTHX_ cophh, key, keylen, hash,            \
+                                       (flags & COPHH_KEY_UTF8))
+
+#define cophh_fetch_pvs(cophh, key, flags)                                  \
+    Perl_refcounted_he_fetch_pvn(aTHX_ cophh, STR_WITH_LEN(key), 0,         \
+                                       (flags & COPHH_KEY_UTF8))
+
+#define cophh_fetch_pv(cophh, key, hash, flags)                             \
+    Perl_refcounted_he_fetch_pv(aTHX_ cophh, key, hash,                     \
+                                      (flags & COPHH_KEY_UTF8))
+
+#define cophh_fetch_sv(cophh, key, hash, flags)                             \
+    Perl_refcounted_he_fetch_sv(aTHX_ cophh, key, hash,                     \
+                                      (flags & COPHH_KEY_UTF8))
 
 /*
-=for apidoc Amx|SV *|cophh_fetch_pvs|const COPHH *cophh|"key"|U32 flags
+=for apidoc Amx|bool|cophh_exists_pvn|const COPHH *cophh|const char *key|STRLEN keylen|U32 hash|U32 flags
 
-Like L</cophh_fetch_pvn>, but takes a literal string instead
-of a string/length pair, and no precomputed hash.
+These look up the hint entry in the cop C<cop> with the key specified by
+C<key> (and C<keylen> in the C<pvn> form), returning true if a value exists,
+and false otherwise.
+
+The forms differ in how the key is specified.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =cut
 */
 
-#define cophh_fetch_pvs(cophh, key, flags) \
-    Perl_refcounted_he_fetch_pvn(aTHX_ cophh, STR_WITH_LEN(key), 0, flags)
-
-/*
-=for apidoc Amx|SV *|cophh_fetch_pv|const COPHH *cophh|const char *key|U32 hash|U32 flags
-
-Like L</cophh_fetch_pvn>, but takes a nul-terminated string instead of
-a string/length pair.
-
-=cut
-*/
-
-#define cophh_fetch_pv(cophh, key, hash, flags) \
-    Perl_refcounted_he_fetch_pv(aTHX_ cophh, key, hash, flags)
-
-/*
-=for apidoc Amx|SV *|cophh_fetch_sv|const COPHH *cophh|SV *key|U32 hash|U32 flags
-
-Like L</cophh_fetch_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
-
-#define cophh_fetch_sv(cophh, key, hash, flags) \
-    Perl_refcounted_he_fetch_sv(aTHX_ cophh, key, hash, flags)
-
-/*
-=for apidoc Amx|bool|cophh_exists_pvn|const COPHH *cophh|const char *keypv|STRLEN keylen|U32 hash|U32 flags
-
-Look up the entry in the cop hints hash C<cophh> with the key specified by
-C<keypv> and C<keylen>.  If C<flags> has the C<COPHH_KEY_UTF8> bit set,
-the key octets are interpreted as UTF-8, otherwise they are interpreted
-as Latin-1.  C<hash> is a precomputed hash of the key string, or zero if
-it has not been precomputed.  Returns true if a value exists, and false
-otherwise.
-
-=cut
-*/
-
-#define cophh_exists_pvn(cophh, keypv, keylen, hash, flags) \
-    cBOOL(Perl_refcounted_he_fetch_pvn(aTHX_ cophh, keypv, keylen, hash, flags | COPHH_EXISTS))
-
-/*
-=for apidoc Amx|bool|cophh_exists_pvs|const COPHH *cophh|"key"|U32 flags
-
-Like L</cophh_exists_pvn>, but takes a literal string instead
-of a string/length pair, and no precomputed hash.
-
-=cut
-*/
+#define cophh_exists_pvn(cophh, key, keylen, hash, flags) \
+    cBOOL(Perl_refcounted_he_fetch_pvn(aTHX_ cophh, key, keylen, hash, flags | COPHH_EXISTS))
 
 #define cophh_exists_pvs(cophh, key, flags) \
     cBOOL(Perl_refcounted_he_fetch_pvn(aTHX_ cophh, STR_WITH_LEN(key), 0, flags | COPHH_EXISTS))
 
-/*
-=for apidoc Amx|bool|cophh_exists_pv|const COPHH *cophh|const char *key|U32 hash|U32 flags
-
-Like L</cophh_exists_pvn>, but takes a nul-terminated string instead of
-a string/length pair.
-
-=cut
-*/
-
 #define cophh_exists_pv(cophh, key, hash, flags) \
     cBOOL(Perl_refcounted_he_fetch_pv(aTHX_ cophh, key, hash, flags | COPHH_EXISTS))
-
-/*
-=for apidoc Amx|bool|cophh_exists_sv|const COPHH *cophh|SV *key|U32 hash|U32 flags
-
-Like L</cophh_exists_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
 
 #define cophh_exists_sv(cophh, key, hash, flags) \
     cBOOL(Perl_refcounted_he_fetch_sv(aTHX_ cophh, key, hash, flags | COPHH_EXISTS))
@@ -326,121 +329,101 @@ Generate and return a fresh cop hints hash containing no entries.
 #define cophh_new_empty() ((COPHH *)NULL)
 
 /*
-=for apidoc Amx|COPHH *|cophh_store_pvn|COPHH *cophh|const char *keypv|STRLEN keylen|U32 hash|SV *value|U32 flags
+=for apidoc  Amx|COPHH *|cophh_store_pv |COPHH *cophh|const char *key              |U32 hash|SV *value|U32 flags
+=for apidoc_item|COPHH *|cophh_store_pvn|COPHH *cophh|const char *key|STRLEN keylen|U32 hash|SV *value|U32 flags
+=for apidoc_item|COPHH *|cophh_store_pvs|COPHH *cophh|           "key"                      |SV *value|U32 flags
+=for apidoc_item|COPHH *|cophh_store_sv |COPHH *cophh|        SV *key              |U32 hash|SV *value|U32 flags
 
-Stores a value, associated with a key, in the cop hints hash C<cophh>,
-and returns the modified hash.  The returned hash pointer is in general
+These store a value, associated with a key, in the cop hints hash C<cophh>,
+and return the modified hash.  The returned hash pointer is in general
 not the same as the hash pointer that was passed in.  The input hash is
 consumed by the function, and the pointer to it must not be subsequently
 used.  Use L</cophh_copy> if you need both hashes.
 
-The key is specified by C<keypv> and C<keylen>.  If C<flags> has the
-C<COPHH_KEY_UTF8> bit set, the key octets are interpreted as UTF-8,
-otherwise they are interpreted as Latin-1.  C<hash> is a precomputed
-hash of the key string, or zero if it has not been precomputed.
-
 C<value> is the scalar value to store for this key.  C<value> is copied
-by this function, which thus does not take ownership of any reference
-to it, and later changes to the scalar will not be reflected in the
-value visible in the cop hints hash.  Complex types of scalar will not
-be stored with referential integrity, but will be coerced to strings.
+by these functions, which thus do not take ownership of any reference
+to it, and hence later changes to the scalar will not be reflected in the value
+visible in the cop hints hash.  Complex types of scalar will not be stored with
+referential integrity, but will be coerced to strings.
+
+The forms differ in how the key is specified.  In all forms, the key is pointed
+to by C<key>.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =cut
 */
 
-#define cophh_store_pvn(cophh, keypv, keylen, hash, value, flags) \
-    Perl_refcounted_he_new_pvn(aTHX_ cophh, keypv, keylen, hash, value, flags)
-
-/*
-=for apidoc Amx|COPHH *|cophh_store_pvs|COPHH *cophh|"key"|SV *value|U32 flags
-
-Like L</cophh_store_pvn>, but takes a literal string instead
-of a string/length pair, and no precomputed hash.
-
-=cut
-*/
+#define cophh_store_pvn(cophh, key, keylen, hash, value, flags) \
+    Perl_refcounted_he_new_pvn(aTHX_ cophh, key, keylen, hash, value, flags)
 
 #define cophh_store_pvs(cophh, key, value, flags) \
     Perl_refcounted_he_new_pvn(aTHX_ cophh, STR_WITH_LEN(key), 0, value, flags)
 
-/*
-=for apidoc Amx|COPHH *|cophh_store_pv|COPHH *cophh|const char *key|U32 hash|SV *value|U32 flags
-
-Like L</cophh_store_pvn>, but takes a nul-terminated string instead of
-a string/length pair.
-
-=cut
-*/
-
 #define cophh_store_pv(cophh, key, hash, value, flags) \
     Perl_refcounted_he_new_pv(aTHX_ cophh, key, hash, value, flags)
-
-/*
-=for apidoc Amx|COPHH *|cophh_store_sv|COPHH *cophh|SV *key|U32 hash|SV *value|U32 flags
-
-Like L</cophh_store_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
 
 #define cophh_store_sv(cophh, key, hash, value, flags) \
     Perl_refcounted_he_new_sv(aTHX_ cophh, key, hash, value, flags)
 
 /*
-=for apidoc Amx|COPHH *|cophh_delete_pvn|COPHH *cophh|const char *keypv|STRLEN keylen|U32 hash|U32 flags
+=for apidoc  Amx|COPHH *|cophh_delete_pv |COPHH *cophh|const char *key              |U32 hash|U32 flags
+=for apidoc_item|COPHH *|cophh_delete_pvn|COPHH *cophh|const char *key|STRLEN keylen|U32 hash|U32 flags
+=for apidoc_item|COPHH *|cophh_delete_pvs|COPHH *cophh|           "key"                      |U32 flags
+=for apidoc_item|COPHH *|cophh_delete_sv |COPHH *cophh|        SV *key              |U32 hash|U32 flags
 
-Delete a key and its associated value from the cop hints hash C<cophh>,
-and returns the modified hash.  The returned hash pointer is in general
+These delete a key and its associated value from the cop hints hash C<cophh>,
+and return the modified hash.  The returned hash pointer is in general
 not the same as the hash pointer that was passed in.  The input hash is
 consumed by the function, and the pointer to it must not be subsequently
 used.  Use L</cophh_copy> if you need both hashes.
 
-The key is specified by C<keypv> and C<keylen>.  If C<flags> has the
-C<COPHH_KEY_UTF8> bit set, the key octets are interpreted as UTF-8,
-otherwise they are interpreted as Latin-1.  C<hash> is a precomputed
-hash of the key string, or zero if it has not been precomputed.
+The forms differ in how the key is specified.  In all forms, the key is pointed
+to by C<key>.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =cut
 */
 
-#define cophh_delete_pvn(cophh, keypv, keylen, hash, flags) \
-    Perl_refcounted_he_new_pvn(aTHX_ cophh, keypv, keylen, hash, \
+#define cophh_delete_pvn(cophh, key, keylen, hash, flags) \
+    Perl_refcounted_he_new_pvn(aTHX_ cophh, key, keylen, hash, \
         (SV *)NULL, flags)
-
-/*
-=for apidoc Amx|COPHH *|cophh_delete_pvs|COPHH *cophh|"key"|U32 flags
-
-Like L</cophh_delete_pvn>, but takes a literal string instead
-of a string/length pair, and no precomputed hash.
-
-=cut
-*/
 
 #define cophh_delete_pvs(cophh, key, flags) \
     Perl_refcounted_he_new_pvn(aTHX_ cophh, STR_WITH_LEN(key), 0, \
         (SV *)NULL, flags)
 
-/*
-=for apidoc Amx|COPHH *|cophh_delete_pv|COPHH *cophh|char *key|U32 hash|U32 flags
-
-Like L</cophh_delete_pvn>, but takes a nul-terminated string instead of
-a string/length pair.
-
-=cut
-*/
-
 #define cophh_delete_pv(cophh, key, hash, flags) \
     Perl_refcounted_he_new_pv(aTHX_ cophh, key, hash, (SV *)NULL, flags)
-
-/*
-=for apidoc Amx|COPHH *|cophh_delete_sv|COPHH *cophh|SV *key|U32 hash|U32 flags
-
-Like L</cophh_delete_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
 
 #define cophh_delete_sv(cophh, key, hash, flags) \
     Perl_refcounted_he_new_sv(aTHX_ cophh, key, hash, (SV *)NULL, flags)
@@ -480,11 +463,15 @@ struct cop {
 =for apidoc Am|const char *|CopFILE|const COP * c
 Returns the name of the file associated with the C<COP> C<c>
 
-=for apidoc Am|STRLEN|CopLINE|const COP * c
+=for apidoc Am|line_t|CopLINE|const COP * c
 Returns the line number in the source code associated with the C<COP> C<c>
 
 =for apidoc Am|AV *|CopFILEAV|const COP * c
-Returns the AV associated with the C<COP> C<c>
+Returns the AV associated with the C<COP> C<c>, creating it if necessary.
+
+=for apidoc Am|AV *|CopFILEAVn|const COP * c
+Returns the AV associated with the C<COP> C<c>, returning NULL if it
+doesn't already exist.
 
 =for apidoc Am|SV *|CopFILESV|const COP * c
 Returns the SV associated with the C<COP> C<c>
@@ -520,6 +507,7 @@ string C<p>, creating the package if necessary.
 */
 
 #ifdef USE_ITHREADS
+
 #  define CopFILE(c)		((c)->cop_file)
 #  define CopFILEGV(c)		(CopFILE(c) \
                                  ? gv_fetchfile(CopFILE(c)) : NULL)
@@ -533,13 +521,15 @@ string C<p>, creating the package if necessary.
                                  ? GvAV(gv_fetchfile(CopFILE(c))) : NULL)
 #  define CopFILEAVx(c)		(assert_(CopFILE(c)) \
                                    GvAV(gv_fetchfile(CopFILE(c))))
-
+#  define CopFILEAVn(c)         (cop_file_avn(c))
 #  define CopSTASH(c)           PL_stashpad[(c)->cop_stashoff]
 #  define CopSTASH_set(c,hv)	((c)->cop_stashoff = (hv)		\
                                     ? alloccopstash(hv)			\
                                     : 0)
 #  define CopFILE_free(c)	(PerlMemShared_free(CopFILE(c)),(CopFILE(c) = NULL))
-#else /* Above: no threads; Below yes threads */
+
+#else /* Above: yes threads; Below no threads */
+
 #  define CopFILEGV(c)		((c)->cop_filegv)
 #  define CopFILEGV_set(c,gv)	((c)->cop_filegv = (GV*)SvREFCNT_inc(gv))
 #  define CopFILE_set(c,pv)	CopFILEGV_set((c), gv_fetchfile(pv))
@@ -551,6 +541,7 @@ string C<p>, creating the package if necessary.
 #  else
 #    define CopFILEAVx(c)	(GvAV(CopFILEGV(c)))
 # endif
+#  define CopFILEAVn(c)         (CopFILEGV(c) ? GvAVn(CopFILEGV(c)) : NULL)
 #  define CopFILE(c)		(CopFILEGV(c) /* +2 for '_<' */         \
                                     ? GvNAME(CopFILEGV(c))+2 : NULL)
 #  define CopSTASH(c)		((c)->cop_stash)
@@ -568,106 +559,89 @@ string C<p>, creating the package if necessary.
 #define CopHINTHASH_set(c,h)	((c)->cop_hints_hash = (h))
 
 /*
-=for apidoc Am|SV *|cop_hints_fetch_pvn|const COP *cop|const char *keypv|STRLEN keylen|U32 hash|U32 flags
+=for apidoc   Am|SV *|cop_hints_fetch_pv |const COP *cop|const char *key              |U32 hash|U32 flags
+=for apidoc_item|SV *|cop_hints_fetch_pvn|const COP *cop|const char *key|STRLEN keylen|U32 hash|U32 flags
+=for apidoc_item|SV *|cop_hints_fetch_pvs|const COP *cop|           "key"             |U32 flags
+=for apidoc_item|SV *|cop_hints_fetch_sv |const COP *cop|        SV *key              |U32 hash|U32 flags
 
-Look up the hint entry in the cop C<cop> with the key specified by
-C<keypv> and C<keylen>.  If C<flags> has the C<COPHH_KEY_UTF8> bit set,
-the key octets are interpreted as UTF-8, otherwise they are interpreted
-as Latin-1.  C<hash> is a precomputed hash of the key string, or zero if
-it has not been precomputed.  Returns a mortal scalar copy of the value
-associated with the key, or C<&PL_sv_placeholder> if there is no value
-associated with the key.
+These look up the hint entry in the cop C<cop> with the key specified by
+C<key> (and C<keylen> in the C<pvn> form), returning that value as a mortal
+scalar copy, or C<&PL_sv_placeholder> if there is no value associated with the
+key.
+
+The forms differ in how the key is specified.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =cut
 */
 
-#define cop_hints_fetch_pvn(cop, keypv, keylen, hash, flags) \
-    cophh_fetch_pvn(CopHINTHASH_get(cop), keypv, keylen, hash, flags)
-
-/*
-=for apidoc Am|SV *|cop_hints_fetch_pvs|const COP *cop|"key"|U32 flags
-
-Like L</cop_hints_fetch_pvn>, but takes a literal string
-instead of a string/length pair, and no precomputed hash.
-
-=cut
-*/
+#define cop_hints_fetch_pvn(cop, key, keylen, hash, flags) \
+    cophh_fetch_pvn(CopHINTHASH_get(cop), key, keylen, hash, flags)
 
 #define cop_hints_fetch_pvs(cop, key, flags) \
     cophh_fetch_pvs(CopHINTHASH_get(cop), key, flags)
 
-/*
-=for apidoc Am|SV *|cop_hints_fetch_pv|const COP *cop|const char *key|U32 hash|U32 flags
-
-Like L</cop_hints_fetch_pvn>, but takes a nul-terminated string instead
-of a string/length pair.
-
-=cut
-*/
-
 #define cop_hints_fetch_pv(cop, key, hash, flags) \
     cophh_fetch_pv(CopHINTHASH_get(cop), key, hash, flags)
-
-/*
-=for apidoc Am|SV *|cop_hints_fetch_sv|const COP *cop|SV *key|U32 hash|U32 flags
-
-Like L</cop_hints_fetch_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
 
 #define cop_hints_fetch_sv(cop, key, hash, flags) \
     cophh_fetch_sv(CopHINTHASH_get(cop), key, hash, flags)
 
 /*
-=for apidoc Am|bool|cop_hints_exists_pvn|const COP *cop|const char *keypv|STRLEN keylen|U32 hash|U32 flags
+=for apidoc  Am|bool|cop_hints_exists_pv |const COP *cop|const char *key|U32 hash               |U32 flags
+=for apidoc_item|bool|cop_hints_exists_pvn|const COP *cop|const char *key|STRLEN keylen|U32 hash|U32 flags
+=for apidoc_item|bool|cop_hints_exists_pvs|const COP *cop|           "key"                      |U32 flags
+=for apidoc_item|bool|cop_hints_exists_sv |const COP *cop|        SV *key              |U32 hash|U32 flags
 
-Look up the hint entry in the cop C<cop> with the key specified by
-C<keypv> and C<keylen>.  If C<flags> has the C<COPHH_KEY_UTF8> bit set,
-the key octets are interpreted as UTF-8, otherwise they are interpreted
-as Latin-1.  C<hash> is a precomputed hash of the key string, or zero if
-it has not been precomputed.  Returns true if a value exists, and false
-otherwise.
+These look up the hint entry in the cop C<cop> with the key specified by
+C<key> (and C<keylen> in the C<pvn> form), returning true if a value exists,
+and false otherwise.
+
+The forms differ in how the key is specified.  In all forms, the key is pointed
+to by C<key>.
+In the plain C<pv> form, the key is a C language NUL-terminated string.
+In the C<pvs> form, the key is a C language string literal.
+In the C<pvn> form, an additional parameter, C<keylen>, specifies the length of
+the string, which hence, may contain embedded-NUL characters.
+In the C<sv> form, C<*key> is an SV, and the key is the PV extracted from that.
+using C<L</SvPV_const>>.
+
+C<hash> is a precomputed hash of the key string, or zero if it has not been
+precomputed.  This parameter is omitted from the C<pvs> form, as it is computed
+automatically at compile time.
+
+The only flag currently used from the C<flags> parameter is C<COPHH_KEY_UTF8>.
+It is illegal to set this in the C<sv> form.  In the C<pv*> forms, it specifies
+whether the key octets are interpreted as UTF-8 (if set) or as Latin-1 (if
+cleared).  The C<sv> form uses the underlying SV to determine the UTF-8ness of
+the octets.
 
 =cut
 */
 
-#define cop_hints_exists_pvn(cop, keypv, keylen, hash, flags) \
-    cophh_exists_pvn(CopHINTHASH_get(cop), keypv, keylen, hash, flags)
-
-/*
-=for apidoc Am|bool|cop_hints_exists_pvs|const COP *cop|"key"|U32 flags
-
-Like L</cop_hints_exists_pvn>, but takes a literal string
-instead of a string/length pair, and no precomputed hash.
-
-=cut
-*/
+#define cop_hints_exists_pvn(cop, key, keylen, hash, flags) \
+    cophh_exists_pvn(CopHINTHASH_get(cop), key, keylen, hash, flags)
 
 #define cop_hints_exists_pvs(cop, key, flags) \
     cophh_exists_pvs(CopHINTHASH_get(cop), key, flags)
 
-/*
-=for apidoc Am|bool|cop_hints_exists_pv|const COP *cop|const char *key|U32 hash|U32 flags
-
-Like L</cop_hints_exists_pvn>, but takes a nul-terminated string instead
-of a string/length pair.
-
-=cut
-*/
-
 #define cop_hints_exists_pv(cop, key, hash, flags) \
     cophh_exists_pv(CopHINTHASH_get(cop), key, hash, flags)
-
-/*
-=for apidoc Am|bool|cop_hints_exists_sv|const COP *cop|SV *key|U32 hash|U32 flags
-
-Like L</cop_hints_exists_pvn>, but takes a Perl scalar instead of a
-string/length pair.
-
-=cut
-*/
 
 #define cop_hints_exists_sv(cop, key, hash, flags) \
     cophh_exists_sv(CopHINTHASH_get(cop), key, hash, flags)
@@ -686,19 +660,17 @@ be zero.
     cophh_2hv(CopHINTHASH_get(cop), flags)
 
 /*
-=for apidoc Am|const char *|CopLABEL|COP *const cop
+=for apidoc   Am|const char *|CopLABEL          |COP *const cop
+=for apidoc_item|const char *|CopLABEL_len      |COP *const cop|STRLEN *len
+=for apidoc_item|const char *|CopLABEL_len_flags|COP *const cop|STRLEN *len|U32 *flags
 
-Returns the label attached to a cop.
+These return the label attached to a cop.
 
-=for apidoc Am|const char *|CopLABEL_len|COP *const cop|STRLEN *len
+C<CopLABEL_len> and C<CopLABEL_len_flags> additionally store the number of
+bytes comprising the returned label into C<*len>.
 
-Returns the label attached to a cop, and stores its length in bytes into
-C<*len>.
-
-=for apidoc Am|const char *|CopLABEL_len_flags|COP *const cop|STRLEN *len|U32 *flags
-
-Returns the label attached to a cop, and stores its length in bytes into
-C<*len>.  Upon return, C<*flags> will be set to either C<SVf_UTF8> or 0.
+C<CopLABEL_len_flags> additionally returns the UTF-8ness of the returned label,
+by setting C<*flags> to 0 or C<SVf_UTF8>.
 
 =cut
 */
@@ -860,9 +832,9 @@ struct block_loop {
                 ? &GvSV((c)->blk_loop.itervar_u.gv)     \
                 : (SV **)&(c)->blk_loop.itervar_u.gv)
 
-#define CxLABEL(c)	(0 + CopLABEL((c)->blk_oldcop))
-#define CxLABEL_len(c,len)	(0 + CopLABEL_len((c)->blk_oldcop, len))
-#define CxLABEL_len_flags(c,len,flags)	(0 + CopLABEL_len_flags((c)->blk_oldcop, len, flags))
+#define CxLABEL(c)	(CopLABEL((c)->blk_oldcop))
+#define CxLABEL_len(c,len)	(CopLABEL_len((c)->blk_oldcop, len))
+#define CxLABEL_len_flags(c,len,flags)	((const char *)CopLABEL_len_flags((c)->blk_oldcop, len, flags))
 #define CxHASARGS(c)	(((c)->cx_type & CXp_HASARGS) == CXp_HASARGS)
 
 /* CxLVAL(): the lval flags of the call site: the relevant flag bits from
@@ -927,7 +899,7 @@ struct block {
 
 #define CX_DEBUG(cx, action)						\
     DEBUG_l(								\
-        Perl_deb(aTHX_ "CX %ld %s %s (scope %ld,%ld) (save %ld,%ld) at %s:%d\n",\
+        Perl_deb(aTHX_ "CX %ld %s %s (scope %ld,%ld) (save %ld,%ld) in %s at %s:%d\n",\
                     (long)cxstack_ix,					\
                     action,						\
                     PL_block_type[CxTYPE(cx)],	                        \
@@ -935,7 +907,7 @@ struct block {
                     (long)(cx->blk_oldscopesp),		                \
                     (long)PL_savestack_ix,				\
                     (long)(cx->blk_oldsaveix),                          \
-                    __FILE__, __LINE__));
+                    SAFE_FUNCTION__, __FILE__, __LINE__));
 
 
 
@@ -1080,6 +1052,10 @@ struct context {
 #define CxFOREACH(c)	(   CxTYPE(cx) >= CXt_LOOP_ARY                  \
                          && CxTYPE(cx) <= CXt_LOOP_LIST)
 
+/* private flags for CXt_DEFER */
+#define CXp_FINALLY     0x20    /* `finally` block; semantically identical
+                                 * but matters for diagnostic messages */
+
 /* deprecated old name before real try/catch was added */
 #define CXp_TRYBLOCK    CXp_EVALBLOCK
 #define CxTRYBLOCK(c)   CxEVALBLOCK(c)
@@ -1196,8 +1172,8 @@ typedef struct stackinfo PERL_SI;
         DEBUG_l({							\
             int i = 0; PERL_SI *p = PL_curstackinfo;			\
             while (p) { i++; p = p->si_prev; }				\
-            Perl_deb(aTHX_ "push STACKINFO %d at %s:%d\n",		\
-                         i, __FILE__, __LINE__);})			\
+            Perl_deb(aTHX_ "push STACKINFO %d in %s at %s:%d\n",        \
+                         i, SAFE_FUNCTION__, __FILE__, __LINE__);})        \
         if (!next) {							\
             next = new_stackinfo(32, 2048/sizeof(PERL_CONTEXT) - 1);	\
             next->si_prev = PL_curstackinfo;				\
@@ -1224,8 +1200,8 @@ typedef struct stackinfo PERL_SI;
         DEBUG_l({							\
             int i = -1; PERL_SI *p = PL_curstackinfo;			\
             while (p) { i++; p = p->si_prev; }				\
-            Perl_deb(aTHX_ "pop  STACKINFO %d at %s:%d\n",		\
-                         i, __FILE__, __LINE__);})			\
+            Perl_deb(aTHX_ "pop  STACKINFO %d in %s at %s:%d\n",        \
+                         i, SAFE_FUNCTION__, __FILE__, __LINE__);})        \
         if (!prev) {							\
             Perl_croak_popstack();					\
         }								\
@@ -1260,17 +1236,17 @@ program; otherwise 0;
 /*
 =for apidoc_section $multicall
 
-=for apidoc Amns||dMULTICALL
+=for apidoc Amn;||dMULTICALL
 Declare local variables for a multicall.  See L<perlcall/LIGHTWEIGHT CALLBACKS>.
 
-=for apidoc Ams||PUSH_MULTICALL|CV* the_cv
+=for apidoc Am;||PUSH_MULTICALL|CV* the_cv
 Opening bracket for a lightweight callback.
 See L<perlcall/LIGHTWEIGHT CALLBACKS>.
 
-=for apidoc Amns||MULTICALL
+=for apidoc Amn;||MULTICALL
 Make a lightweight callback.  See L<perlcall/LIGHTWEIGHT CALLBACKS>.
 
-=for apidoc Amns||POP_MULTICALL
+=for apidoc Amn;||POP_MULTICALL
 Closing bracket for a lightweight callback.
 See L<perlcall/LIGHTWEIGHT CALLBACKS>.
 

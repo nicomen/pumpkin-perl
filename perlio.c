@@ -244,11 +244,7 @@ PerlIO_fdupopen(pTHX_ PerlIO *f, CLONE_PARAMS *param, int flags)
         const int fd = PerlLIO_dup_cloexec(PerlIO_fileno(f));
         if (fd >= 0) {
             char mode[8];
-#      ifdef DJGPP
-            const int omode = djgpp_get_stream_mode(f);
-#      else
             const int omode = fcntl(fd, F_GETFL);
-#      endif
             PerlIO_intmode2str(omode,mode,NULL);
             /* the r+ is a hack */
             return PerlIO_fdopen(fd, mode);
@@ -366,7 +362,7 @@ PerlIO_debug(const char *fmt, ...)
         const char * const s = CopFILE(PL_curcop);
         /* Use fixed buffer as sv_catpvf etc. needs SVs */
         char buffer[1024];
-        const STRLEN len1 = my_snprintf(buffer, sizeof(buffer), "%.40s:%" IVdf " ", s ? s : "(none)", (IV) CopLINE(PL_curcop));
+        const STRLEN len1 = my_snprintf(buffer, sizeof(buffer), "%.40s:%" LINE_Tf " ", s ? s : "(none)", CopLINE(PL_curcop));
 #  ifdef USE_QUADMATH
 #    ifdef HAS_VSNPRINTF
         /* my_vsnprintf() isn't available with quadmath, but the native vsnprintf()
@@ -384,8 +380,8 @@ PerlIO_debug(const char *fmt, ...)
 #else
         const char *s = CopFILE(PL_curcop);
         STRLEN len;
-        SV * const sv = Perl_newSVpvf(aTHX_ "%s:%" IVdf " ", s ? s : "(none)",
-                                      (IV) CopLINE(PL_curcop));
+        SV * const sv = Perl_newSVpvf(aTHX_ "%s:%" LINE_Tf " ",
+                                      s ? s : "(none)", CopLINE(PL_curcop));
         Perl_sv_vcatpvf(aTHX_ sv, fmt, &ap);
 
         s = SvPV_const(sv, len);
@@ -694,9 +690,9 @@ PerlIO_get_layers(pTHX_ PerlIO *f)
             newSVpv(l->tab->name, 0) : &PL_sv_undef;
             SV * const arg = l->tab && l->tab->Getarg ?
             (*l->tab->Getarg)(aTHX_ &l, 0, 0) : &PL_sv_undef;
-            av_push(av, name);
-            av_push(av, arg);
-            av_push(av, newSViv((IV)l->flags));
+            av_push_simple(av, name);
+            av_push_simple(av, arg);
+            av_push_simple(av, newSViv((IV)l->flags));
             l = l->next;
         }
     }
@@ -822,7 +818,7 @@ XS(XS_io_MODIFY_SCALAR_ATTRIBUTES)
         const char * const name = SvPV_const(ST(i), len);
         SV * const layer = PerlIO_find_layer(aTHX_ name, len, 1);
         if (layer) {
-            av_push(av, SvREFCNT_inc_simple_NN(layer));
+            av_push_simple(av, SvREFCNT_inc_simple_NN(layer));
         }
         else {
             ST(count) = ST(i);
@@ -4903,7 +4899,7 @@ PerlIO *
 PerlIO_open(const char *path, const char *mode)
 {
     dTHX;
-    SV *name = sv_2mortal(newSVpv(path, 0));
+    SV *name = newSVpvn_flags(path, path == NULL ? 0 : strlen(path), SVs_TEMP);
     return PerlIO_openn(aTHX_ NULL, mode, -1, 0, 0, NULL, 1, &name);
 }
 
@@ -4912,7 +4908,7 @@ PerlIO *
 PerlIO_reopen(const char *path, const char *mode, PerlIO *f)
 {
     dTHX;
-    SV *name = sv_2mortal(newSVpv(path,0));
+    SV *name = newSVpvn_flags(path, path == NULL ? 0 : strlen(path), SVs_TEMP);
     return PerlIO_openn(aTHX_ NULL, mode, -1, 0, 0, f, 1, &name);
 }
 
@@ -5127,6 +5123,8 @@ Perl_PerlIO_restore_errno(pTHX_ PerlIO *f)
 const char *
 Perl_PerlIO_context_layers(pTHX_ const char *mode)
 {
+    /* Returns the layers set by "use open" */
+
     const char *direction = NULL;
     SV *layers;
     /*

@@ -4,14 +4,14 @@
    Any changes made here will be lost!
  */
 
-#define PERL_BISON_VERSION  30006
+#define PERL_BISON_VERSION  30003
 
 #ifdef PERL_CORE
-/* A Bison parser, made by GNU Bison 3.6.4.  */
+/* A Bison parser, made by GNU Bison 3.3.  */
 
 /* Bison interface for Yacc-like parsers in C
 
-   Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2020 Free Software Foundation,
+   Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2019 Free Software Foundation,
    Inc.
 
    This program is free software: you can redistribute it and/or modify
@@ -40,9 +40,8 @@
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
-/* DO NOT RELY ON FEATURES THAT ARE NOT DOCUMENTED in the manual,
-   especially those whose name start with YY_ or yy_.  They are
-   private implementation details that can be changed or removed.  */
+/* Undocumented macros, especially those whose name start with YY_,
+   are private implementation details.  Do not rely on them.  */
 
 /* Debug traces.  */
 #ifndef YYDEBUG
@@ -52,128 +51,124 @@
 extern int yydebug;
 #endif
 
-/* Token kinds.  */
+/* Token type.  */
 #ifndef YYTOKENTYPE
 # define YYTOKENTYPE
   enum yytokentype
   {
-    YYEMPTY = -2,
-    YYEOF = 0,                     /* "end of file"  */
-    YYerror = 256,                 /* error  */
-    YYUNDEF = 257,                 /* "invalid token"  */
-    GRAMPROG = 258,                /* GRAMPROG  */
-    GRAMEXPR = 259,                /* GRAMEXPR  */
-    GRAMBLOCK = 260,               /* GRAMBLOCK  */
-    GRAMBARESTMT = 261,            /* GRAMBARESTMT  */
-    GRAMFULLSTMT = 262,            /* GRAMFULLSTMT  */
-    GRAMSTMTSEQ = 263,             /* GRAMSTMTSEQ  */
-    GRAMSUBSIGNATURE = 264,        /* GRAMSUBSIGNATURE  */
-    PERLY_AMPERSAND = 265,         /* PERLY_AMPERSAND  */
-    PERLY_BRACE_OPEN = 266,        /* PERLY_BRACE_OPEN  */
-    PERLY_BRACE_CLOSE = 267,       /* PERLY_BRACE_CLOSE  */
-    PERLY_BRACKET_OPEN = 268,      /* PERLY_BRACKET_OPEN  */
-    PERLY_BRACKET_CLOSE = 269,     /* PERLY_BRACKET_CLOSE  */
-    PERLY_COMMA = 270,             /* PERLY_COMMA  */
-    PERLY_DOLLAR = 271,            /* PERLY_DOLLAR  */
-    PERLY_DOT = 272,               /* PERLY_DOT  */
-    PERLY_EQUAL_SIGN = 273,        /* PERLY_EQUAL_SIGN  */
-    PERLY_MINUS = 274,             /* PERLY_MINUS  */
-    PERLY_PERCENT_SIGN = 275,      /* PERLY_PERCENT_SIGN  */
-    PERLY_PLUS = 276,              /* PERLY_PLUS  */
-    PERLY_SEMICOLON = 277,         /* PERLY_SEMICOLON  */
-    PERLY_SLASH = 278,             /* PERLY_SLASH  */
-    PERLY_SNAIL = 279,             /* PERLY_SNAIL  */
-    PERLY_STAR = 280,              /* PERLY_STAR  */
-    BAREWORD = 281,                /* BAREWORD  */
-    METHOD = 282,                  /* METHOD  */
-    FUNCMETH = 283,                /* FUNCMETH  */
-    THING = 284,                   /* THING  */
-    PMFUNC = 285,                  /* PMFUNC  */
-    PRIVATEREF = 286,              /* PRIVATEREF  */
-    QWLIST = 287,                  /* QWLIST  */
-    FUNC0OP = 288,                 /* FUNC0OP  */
-    FUNC0SUB = 289,                /* FUNC0SUB  */
-    UNIOPSUB = 290,                /* UNIOPSUB  */
-    LSTOPSUB = 291,                /* LSTOPSUB  */
-    PLUGEXPR = 292,                /* PLUGEXPR  */
-    PLUGSTMT = 293,                /* PLUGSTMT  */
-    LABEL = 294,                   /* LABEL  */
-    FORMAT = 295,                  /* FORMAT  */
-    SUB = 296,                     /* SUB  */
-    SIGSUB = 297,                  /* SIGSUB  */
-    ANONSUB = 298,                 /* ANONSUB  */
-    ANON_SIGSUB = 299,             /* ANON_SIGSUB  */
-    PACKAGE = 300,                 /* PACKAGE  */
-    USE = 301,                     /* USE  */
-    WHILE = 302,                   /* WHILE  */
-    UNTIL = 303,                   /* UNTIL  */
-    IF = 304,                      /* IF  */
-    UNLESS = 305,                  /* UNLESS  */
-    ELSE = 306,                    /* ELSE  */
-    ELSIF = 307,                   /* ELSIF  */
-    CONTINUE = 308,                /* CONTINUE  */
-    FOR = 309,                     /* FOR  */
-    GIVEN = 310,                   /* GIVEN  */
-    WHEN = 311,                    /* WHEN  */
-    DEFAULT = 312,                 /* DEFAULT  */
-    TRY = 313,                     /* TRY  */
-    CATCH = 314,                   /* CATCH  */
-    LOOPEX = 315,                  /* LOOPEX  */
-    DOTDOT = 316,                  /* DOTDOT  */
-    YADAYADA = 317,                /* YADAYADA  */
-    FUNC0 = 318,                   /* FUNC0  */
-    FUNC1 = 319,                   /* FUNC1  */
-    FUNC = 320,                    /* FUNC  */
-    UNIOP = 321,                   /* UNIOP  */
-    LSTOP = 322,                   /* LSTOP  */
-    MULOP = 323,                   /* MULOP  */
-    ADDOP = 324,                   /* ADDOP  */
-    DOLSHARP = 325,                /* DOLSHARP  */
-    DO = 326,                      /* DO  */
-    HASHBRACK = 327,               /* HASHBRACK  */
-    NOAMP = 328,                   /* NOAMP  */
-    LOCAL = 329,                   /* LOCAL  */
-    MY = 330,                      /* MY  */
-    REQUIRE = 331,                 /* REQUIRE  */
-    COLONATTR = 332,               /* COLONATTR  */
-    FORMLBRACK = 333,              /* FORMLBRACK  */
-    FORMRBRACK = 334,              /* FORMRBRACK  */
-    SUBLEXSTART = 335,             /* SUBLEXSTART  */
-    SUBLEXEND = 336,               /* SUBLEXEND  */
-    DEFER = 337,                   /* DEFER  */
-    PREC_LOW = 338,                /* PREC_LOW  */
-    OROP = 339,                    /* OROP  */
-    ANDOP = 340,                   /* ANDOP  */
-    NOTOP = 341,                   /* NOTOP  */
-    ASSIGNOP = 342,                /* ASSIGNOP  */
-    PERLY_QUESTION_MARK = 343,     /* PERLY_QUESTION_MARK  */
-    PERLY_COLON = 344,             /* PERLY_COLON  */
-    OROR = 345,                    /* OROR  */
-    DORDOR = 346,                  /* DORDOR  */
-    ANDAND = 347,                  /* ANDAND  */
-    BITOROP = 348,                 /* BITOROP  */
-    BITANDOP = 349,                /* BITANDOP  */
-    CHEQOP = 350,                  /* CHEQOP  */
-    NCEQOP = 351,                  /* NCEQOP  */
-    CHRELOP = 352,                 /* CHRELOP  */
-    NCRELOP = 353,                 /* NCRELOP  */
-    SHIFTOP = 354,                 /* SHIFTOP  */
-    MATCHOP = 355,                 /* MATCHOP  */
-    PERLY_EXCLAMATION_MARK = 356,  /* PERLY_EXCLAMATION_MARK  */
-    PERLY_TILDE = 357,             /* PERLY_TILDE  */
-    UMINUS = 358,                  /* UMINUS  */
-    REFGEN = 359,                  /* REFGEN  */
-    POWOP = 360,                   /* POWOP  */
-    PREINC = 361,                  /* PREINC  */
-    PREDEC = 362,                  /* PREDEC  */
-    POSTINC = 363,                 /* POSTINC  */
-    POSTDEC = 364,                 /* POSTDEC  */
-    POSTJOIN = 365,                /* POSTJOIN  */
-    ARROW = 366,                   /* ARROW  */
-    PERLY_PAREN_CLOSE = 367,       /* PERLY_PAREN_CLOSE  */
-    PERLY_PAREN_OPEN = 368         /* PERLY_PAREN_OPEN  */
+    GRAMPROG = 258,
+    GRAMEXPR = 259,
+    GRAMBLOCK = 260,
+    GRAMBARESTMT = 261,
+    GRAMFULLSTMT = 262,
+    GRAMSTMTSEQ = 263,
+    GRAMSUBSIGNATURE = 264,
+    PERLY_AMPERSAND = 265,
+    PERLY_BRACE_OPEN = 266,
+    PERLY_BRACE_CLOSE = 267,
+    PERLY_BRACKET_OPEN = 268,
+    PERLY_BRACKET_CLOSE = 269,
+    PERLY_COMMA = 270,
+    PERLY_DOLLAR = 271,
+    PERLY_DOT = 272,
+    PERLY_EQUAL_SIGN = 273,
+    PERLY_MINUS = 274,
+    PERLY_PERCENT_SIGN = 275,
+    PERLY_PLUS = 276,
+    PERLY_SEMICOLON = 277,
+    PERLY_SLASH = 278,
+    PERLY_SNAIL = 279,
+    PERLY_STAR = 280,
+    KW_FORMAT = 281,
+    KW_PACKAGE = 282,
+    KW_LOCAL = 283,
+    KW_MY = 284,
+    KW_IF = 285,
+    KW_ELSE = 286,
+    KW_ELSIF = 287,
+    KW_UNLESS = 288,
+    KW_FOR = 289,
+    KW_UNTIL = 290,
+    KW_WHILE = 291,
+    KW_CONTINUE = 292,
+    KW_GIVEN = 293,
+    KW_WHEN = 294,
+    KW_DEFAULT = 295,
+    KW_TRY = 296,
+    KW_CATCH = 297,
+    KW_FINALLY = 298,
+    KW_DEFER = 299,
+    KW_REQUIRE = 300,
+    KW_DO = 301,
+    KW_USE_or_NO = 302,
+    KW_SUB_named = 303,
+    KW_SUB_named_sig = 304,
+    KW_SUB_anon = 305,
+    KW_SUB_anon_sig = 306,
+    BAREWORD = 307,
+    METHCALL0 = 308,
+    METHCALL = 309,
+    THING = 310,
+    PMFUNC = 311,
+    PRIVATEREF = 312,
+    QWLIST = 313,
+    FUNC0OP = 314,
+    FUNC0SUB = 315,
+    UNIOPSUB = 316,
+    LSTOPSUB = 317,
+    PLUGEXPR = 318,
+    PLUGSTMT = 319,
+    LABEL = 320,
+    LOOPEX = 321,
+    DOTDOT = 322,
+    YADAYADA = 323,
+    FUNC0 = 324,
+    FUNC1 = 325,
+    FUNC = 326,
+    UNIOP = 327,
+    LSTOP = 328,
+    MULOP = 329,
+    ADDOP = 330,
+    DOLSHARP = 331,
+    HASHBRACK = 332,
+    NOAMP = 333,
+    COLONATTR = 334,
+    FORMLBRACK = 335,
+    FORMRBRACK = 336,
+    SUBLEXSTART = 337,
+    SUBLEXEND = 338,
+    PREC_LOW = 339,
+    OROP = 340,
+    ANDOP = 341,
+    NOTOP = 342,
+    ASSIGNOP = 343,
+    PERLY_QUESTION_MARK = 344,
+    PERLY_COLON = 345,
+    OROR = 346,
+    DORDOR = 347,
+    ANDAND = 348,
+    BITOROP = 349,
+    BITANDOP = 350,
+    CHEQOP = 351,
+    NCEQOP = 352,
+    CHRELOP = 353,
+    NCRELOP = 354,
+    SHIFTOP = 355,
+    MATCHOP = 356,
+    PERLY_EXCLAMATION_MARK = 357,
+    PERLY_TILDE = 358,
+    UMINUS = 359,
+    REFGEN = 360,
+    POWOP = 361,
+    PREINC = 362,
+    PREDEC = 363,
+    POSTINC = 364,
+    POSTDEC = 365,
+    POSTJOIN = 366,
+    ARROW = 367,
+    PERLY_PAREN_CLOSE = 368,
+    PERLY_PAREN_OPEN = 369
   };
-  typedef enum yytokentype yytoken_kind_t;
 #endif
 
 /* Value type.  */
@@ -184,10 +179,10 @@ S_is_opval_token(int type) {
     case BAREWORD:
     case FUNC0OP:
     case FUNC0SUB:
-    case FUNCMETH:
     case LABEL:
     case LSTOPSUB:
-    case METHOD:
+    case METHCALL:
+    case METHCALL0:
     case PLUGEXPR:
     case PLUGSTMT:
     case PMFUNC:
@@ -202,6 +197,7 @@ S_is_opval_token(int type) {
 #endif /* PERL_IN_TOKE_C */
 #endif /* PERL_CORE */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
+
 union YYSTYPE
 {
 
@@ -211,8 +207,8 @@ union YYSTYPE
     OP *opval;
     GV *gvval;
 
-
 };
+
 typedef union YYSTYPE YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
 # define YYSTYPE_IS_DECLARED 1
@@ -224,6 +220,6 @@ int yyparse (void);
 
 
 /* Generated from:
- * 0202d23d96cdf036122334ebe94b43491715e1437181e64039e69455620d95a4 perly.y
+ * 55819ef14038cb090c9e92492b254a2a51afa95b3471703ddad0a2546d352fae perly.y
  * acf1cbfd2545faeaaa58b1cf0cf9d7f98b5be0752eb7a54528ef904a9e2e1ca7 regen_perly.pl
  * ex: set ro: */

@@ -1195,10 +1195,9 @@ SKIP:
     # $bad_end ends with a start byte and a single continuation
     my $bad_end = substr($utf, 0, length($utf)-$utf_ch_len+2);
 
-    # WARNING: all offsets are *byte* offsets
     my @hop_tests =
-      (
-       # string      s                off        expected         name
+      (  #           start byte      chars
+       # string      in 'string'     to hop      expected         name
        [ $simple,    0,               5,         5,               "simple in range, forward" ],
        [ $simple,    10,              -5,        5,               "simple in range, backward" ],
        [ $simple,    5,               10,        10,              "simple out of range, forward" ],
@@ -1221,10 +1220,19 @@ SKIP:
        );
 
     for my $test (@hop_tests) {
-        my ($str, $s_off, $off, $want, $name) = @$test;
-        my $result = test_utf8_hop_safe($str, $s_off, $off);
+        my ($str, $s_off, $hop, $want, $name) = @$test;
+        my $result = test_utf8_hop_safe($str, $s_off, $hop);
         is($result, $want, "utf8_hop_safe: $name");
     }
+}
+
+{
+    my $replacement = chr(0xFFFD);
+    use bytes;
+    is(test_UTF8_IS_REPLACEMENT($replacement, length $replacement), 1,
+       "UTF8_IS_REPLACEMENT returns 1 on a REPLACEMENT character");
+    is(test_UTF8_IS_REPLACEMENT($replacement, length $replacement) - 1, 0,
+       "UTF8_IS_REPLACEMENT returns 0 on too short an input");
 }
 
 done_testing;

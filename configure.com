@@ -1870,9 +1870,7 @@ $   DECK
 
 If you or somebody else will be maintaining perl at your site, please
 fill in the correct e-mail address here so that they may be contacted
-if necessary. Currently, the "perlbug" program included with perl
-will send mail to this address in addition to perlbug@perl.org. You may
-enter "none" for no administrator.
+if necessary. You may enter "none" for no administrator.
 $   EOD
 $ ENDIF
 $ dflt = "''cf_email'"
@@ -4573,6 +4571,23 @@ $ tmp = "acess"
 $ GOSUB inlibc
 $ d_access = tmp
 $!
+$! Check for mkostemp
+$!
+$ OS
+$ WS "#if defined(__DECC) || defined(__DECCXX)"
+$ WS "#include <stdlib.h>"
+$ WS "#endif"
+$ WS "#include <stdio.h>"
+$ WS "int main()"
+$ WS "{"
+$ WS "mkostemp(""foo"", 0);"
+$ WS "exit(0);"
+$ WS "}"
+$ CS
+$ tmp = "mkostemp"
+$ GOSUB inlibc
+$ d_mkostemp = tmp
+$!
 $! Check for mkstemp
 $!
 $ OS
@@ -6126,6 +6141,7 @@ $ WC "d_attribute_nonnull='undef'"
 $ WC "d_attribute_noreturn='undef'"
 $ WC "d_attribute_pure='undef'"
 $ WC "d_attribute_unused='undef'"
+$ WC "d_attribute_visibility='undef'"
 $ WC "d_attribute_warn_unused_result='undef'"
 $ WC "d_prctl='undef'"
 $ WC "d_prctl_set_name='undef'"
@@ -6373,6 +6389,7 @@ $ WC "d_mkdtemp='" + d_mkdtemp + "'"
 $ WC "d_mkfifo='undef'"
 $ WC "d_mknod='undef'"
 $ WC "d_mkostemp='undef'"
+$ WC "d_mkostemp='" + d_mkostemp + "'"
 $ WC "d_mkstemp='" + d_mkstemp + "'"
 $ WC "d_mkstemps='" + d_mkstemps + "'"
 $ WC "d_mktime='" + d_mktime + "'"

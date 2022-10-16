@@ -58,6 +58,7 @@ PP(pp_nextstate)
 PP(pp_gvsv)
 {
     dSP;
+    assert(SvTYPE(cGVOP_gv) == SVt_PVGV);
     EXTEND(SP,1);
     if (UNLIKELY(PL_op->op_private & OPpLVAL_INTRO))
         PUSHs(save_scalar(cGVOP_gv));
@@ -96,6 +97,9 @@ PP(pp_stringify)
 PP(pp_gv)
 {
     dSP;
+    /* cGVOP_gv might be a real GV or might be an RV to a CV */
+    assert(SvTYPE(cGVOP_gv) == SVt_PVGV ||
+           (SvTYPE(cGVOP_gv) <= SVt_PVMG && SvROK(cGVOP_gv) && SvTYPE(SvRV(cGVOP_gv)) == SVt_PVCV));
     XPUSHs(MUTABLE_SV(cGVOP_gv));
     RETURN;
 }
@@ -121,6 +125,98 @@ PP(pp_and)
             return cLOGOP->op_other;
         }
     }
+}
+
+/*
+ * Mashup of simple padsv + sassign OPs
+ * Doesn't support the following lengthy and unlikely sassign case:
+ *    (UNLIKELY(PL_op->op_private & OPpASSIGN_CV_TO_GV))
+ *  These cases have a separate optimization, so are not handled here:
+ *    (PL_op->op_private & OPpASSIGN_BACKWARDS) {or,and,dor}assign
+*/
+
+PP(pp_padsv_store)
+{
+    dSP;
+    OP * const op = PL_op;
+    SV** const padentry = &PAD_SVl(op->op_targ);
+    SV* targ = *padentry; /* lvalue to assign into */
+    SV* const val = TOPs; /* RHS value to assign */
+
+    /* !OPf_STACKED is not handled by this OP */
+    assert(op->op_flags & OPf_STACKED);
+
+    /* Inlined, simplified pp_padsv here */
+    if ((op->op_private & (OPpLVAL_INTRO|OPpPAD_STATE)) == OPpLVAL_INTRO) {
+        save_clearsv(padentry);
+    }
+
+    /* Inlined, simplified pp_sassign from here */
+    assert(TAINTING_get || !TAINT_get);
+    if (UNLIKELY(TAINT_get) && !SvTAINTED(val))
+        TAINT_NOT;
+
+    if (
+      UNLIKELY(SvTEMP(targ)) && !SvSMAGICAL(targ) && SvREFCNT(targ) == 1 &&
+      (!isGV_with_GP(targ) || SvFAKE(targ)) && ckWARN(WARN_MISC)
+    )
+        Perl_warner(aTHX_
+            packWARN(WARN_MISC), "Useless assignment to a temporary"
+        );
+    SvSetMagicSV(targ, val);
+
+    SETs(targ);
+    RETURN;
+}
+
+/* A mashup of simplified AELEMFAST_LEX + SASSIGN OPs */
+
+PP(pp_aelemfastlex_store)
+{
+    dSP;
+    OP * const op = PL_op;
+    SV* const val = TOPs; /* RHS value to assign */
+    AV * const av = MUTABLE_AV(PAD_SV(op->op_targ));
+    const I8 key   = (I8)PL_op->op_private;
+    SV * targ = NULL;
+
+    /* !OPf_STACKED is not handled by this OP */
+    assert(op->op_flags & OPf_STACKED);
+
+    /* Inlined, simplified pp_aelemfast here */
+    assert(SvTYPE(av) == SVt_PVAV);
+    assert(key >= 0);
+
+    /* inlined av_fetch() for simple cases ... */
+    if (!SvRMAGICAL(av) && key <= AvFILLp(av)) {
+        targ = AvARRAY(av)[key];
+    }
+    /* ... else do it the hard way */
+    if (!targ) {
+        SV **svp = av_fetch(av, key, 1);
+
+        if (svp)
+            targ = *svp;
+        else
+            DIE(aTHX_ PL_no_aelem, (int)key);
+    }
+
+    /* Inlined, simplified pp_sassign from here */
+    assert(TAINTING_get || !TAINT_get);
+    if (UNLIKELY(TAINT_get) && !SvTAINTED(val))
+        TAINT_NOT;
+
+    if (
+      UNLIKELY(SvTEMP(targ)) && !SvSMAGICAL(targ) && SvREFCNT(targ) == 1 &&
+      (!isGV_with_GP(targ) || SvFAKE(targ)) && ckWARN(WARN_MISC)
+    )
+        Perl_warner(aTHX_
+            packWARN(WARN_MISC), "Useless assignment to a temporary"
+        );
+    SvSetMagicSV(targ, val);
+
+    SETs(targ);
+    RETURN;
 }
 
 PP(pp_sassign)
@@ -991,7 +1087,7 @@ PP(pp_multiconcat)
                    )
             )
             {
-                SV *tmp = sv_newmortal();
+                SV *tmp = newSV_type_mortal(SVt_PV);
                 sv_copypv(tmp, left);
                 SvSETMAGIC(tmp);
                 left = tmp;
@@ -1077,16 +1173,15 @@ PP(pp_multiconcat)
 
                 /* if both args are the same magical value, make one a copy */
                 if (left == right && SvGMAGICAL(left)) {
-                    left = sv_newmortal();
+                    SV * targetsv = right;
                     /* Print the uninitialized warning now, so it includes the
                      * variable name. */
                     if (!SvOK(right)) {
                         if (ckWARN(WARN_UNINITIALIZED))
                             report_uninit(right);
-                        sv_setbool(left, FALSE);
+                        targetsv = &PL_sv_no;
                     }
-                    else
-                        sv_setsv_flags(left, right, 0);
+                    left = sv_mortalcopy_flags(targetsv, 0);
                     SvGETMAGIC(right);
                 }
             }
@@ -1637,6 +1732,9 @@ PP(pp_aelemfast)
         sv = AvARRAY(av)[key];
         if (sv) {
             PUSHs(sv);
+            RETURN;
+        } else if (!lval) {
+            PUSHs(&PL_sv_undef);
             RETURN;
         }
     }
@@ -2223,7 +2321,7 @@ PP(pp_aassign)
     SV **relem;
     SV **lelem;
     U8 gimme;
-    /* PL_delaymagic is restored by JUMPENV_POP on dieing, so we
+    /* PL_delaymagic is restored by JMPENV_POP on dieing, so we
      * only need to save locally, not on the save stack */
     U16 old_delaymagic = PL_delaymagic;
 #ifdef DEBUGGING
@@ -2407,13 +2505,10 @@ PP(pp_aassign)
                     }
                     else {
                         SV *nsv;
-                        /* do get before newSV, in case it dies and leaks */
-                        SvGETMAGIC(rsv);
-                        nsv = newSV(0);
                         /* see comment in S_aassign_copy_common about
                          * SV_NOSTEAL */
-                        sv_setsv_flags(nsv, rsv,
-                                (SV_DO_COW_SVSETSV|SV_NOSTEAL));
+                        nsv = newSVsv_flags(rsv,
+                                (SV_DO_COW_SVSETSV|SV_NOSTEAL|SV_GMAGIC));
                         rsv = *svp = nsv;
                     }
 
@@ -2531,13 +2626,10 @@ PP(pp_aassign)
                 }
                 else {
                     SV *nsv;
-                    /* do get before newSV, in case it dies and leaks */
-                    SvGETMAGIC(rsv);
-                    nsv = newSV(0);
                     /* see comment in S_aassign_copy_common about
                      * SV_NOSTEAL */
-                    sv_setsv_flags(nsv, rsv,
-                            (SV_DO_COW_SVSETSV|SV_NOSTEAL));
+                    nsv = newSVsv_flags(rsv,
+                            (SV_DO_COW_SVSETSV|SV_NOSTEAL|SV_GMAGIC));
                     rsv = *svp = nsv;
                 }
 
@@ -2875,7 +2967,7 @@ PP(pp_qr)
     REGEXP * rx = PM_GETRE(pm);
     regexp *prog = ReANY(rx);
     SV * const pkg = RXp_ENGINE(prog)->qr_package(aTHX_ (rx));
-    SV * const rv = sv_newmortal();
+    SV * const rv = newSV_type_mortal(SVt_IV);
     CV **cvp;
     CV *cv;
 
@@ -3119,7 +3211,6 @@ PP(pp_match)
         EXTEND(SP, nparens + i);
         EXTEND_MORTAL(nparens + i);
         for (i = !i; i <= nparens; i++) {
-            PUSHs(sv_newmortal());
             if (LIKELY((RXp_OFFS(prog)[i].start != -1)
                      && RXp_OFFS(prog)[i].end   != -1 ))
             {
@@ -3134,9 +3225,13 @@ PP(pp_match)
                         "start=%ld, end=%ld, s=%p, strend=%p, len=%" UVuf,
                         (long) i, (long) RXp_OFFS(prog)[i].start,
                         (long)RXp_OFFS(prog)[i].end, s, strend, (UV) len);
-                sv_setpvn(*SP, s, len);
-                if (DO_UTF8(TARG) && is_utf8_string((U8*)s, len))
-                    SvUTF8_on(*SP);
+                PUSHs(newSVpvn_flags(s, len,
+                    (DO_UTF8(TARG))
+                    ? SVf_UTF8|SVs_TEMP
+                    : SVs_TEMP)
+                );
+            } else {
+                PUSHs(sv_newmortal());
             }
         }
         if (global) {
@@ -3289,14 +3384,19 @@ Perl_do_readline(pTHX)
                 || SNARF_EOF(gimme, PL_rs, io, sv)
                 || PerlIO_error(fp)))
         {
-            PerlIO_clearerr(fp);
             if (IoFLAGS(io) & IOf_ARGV) {
                 fp = nextargv(PL_last_in_gv, PL_op->op_flags & OPf_SPECIAL);
-                if (fp)
+                if (fp) {
                     continue;
+                }
                 (void)do_close(PL_last_in_gv, FALSE);
             }
             else if (type == OP_GLOB) {
+                /* clear any errors here so we only fail on the pclose()
+                   failing, which should only happen on the child
+                   failing
+                */
+                PerlIO_clearerr(fp);
                 if (!do_close(PL_last_in_gv, FALSE)) {
                     Perl_ck_warner(aTHX_ packWARN(WARN_GLOB),
                                    "glob failed (child exited with status %d%s)",
@@ -3393,7 +3493,7 @@ PP(pp_helem)
         MAGIC *mg;
         HV *stash;
 
-        /* If we can determine whether the element exist,
+        /* If we can determine whether the element exists,
          * Try to preserve the existenceness of a tied hash
          * element by using EXISTS and DELETE if possible.
          * Fallback to FETCH and STORE otherwise. */
@@ -3410,8 +3510,7 @@ PP(pp_helem)
             if (!defer) {
                 DIE(aTHX_ PL_no_helem_sv, SVfARG(keysv));
             }
-            lv = sv_newmortal();
-            sv_upgrade(lv, SVt_PVLV);
+            lv = newSV_type_mortal(SVt_PVLV);
             LvTYPE(lv) = 'y';
             sv_magic(lv, key2 = newSVsv(keysv), PERL_MAGIC_defelem, NULL, 0);
             SvREFCNT_dec_NN(key2);	/* sv_magic() increments refcount */
@@ -3850,8 +3949,7 @@ PP(pp_multideref)
                             SV* key2;
                             if (!defer)
                                 DIE(aTHX_ PL_no_helem_sv, SVfARG(keysv));
-                            lv = sv_newmortal();
-                            sv_upgrade(lv, SVt_PVLV);
+                            lv = newSV_type_mortal(SVt_PVLV);
                             LvTYPE(lv) = 'y';
                             sv_magic(lv, key2 = newSVsv(keysv),
                                                 PERL_MAGIC_defelem, NULL, 0);
@@ -3897,169 +3995,233 @@ PP(pp_multideref)
 
 PP(pp_iter)
 {
-    PERL_CONTEXT *cx;
-    SV *oldsv;
-    SV **itersvp;
+    PERL_CONTEXT *cx = CX_CUR();
+    SV **itersvp = CxITERVAR(cx);
+    const U8 type = CxTYPE(cx);
 
-    SV *sv;
-    AV *av;
-    IV ix;
-    IV inc;
+    /* Classic "for" syntax iterates one-at-a-time.
+       Many-at-a-time for loops are only for lexicals declared as part of the
+       for loop, and rely on all the lexicals being in adjacent pad slots.
 
-    cx = CX_CUR();
-    itersvp = CxITERVAR(cx);
+       Curiously, even if the iterator variable is a lexical, the pad offset is
+       stored in the targ slot of the ENTERITER op, meaning that targ of this OP
+       has always been zero. Hence we can use this op's targ to hold "how many"
+       for many-at-a-time. We actually store C<how_many - 1>, so that for the
+       case of one-at-a-time we have zero (as before), as this makes all the
+       logic of the for loop below much simpler, with all the other
+       one-at-a-time cases just falling out of this "naturally". */
+    PADOFFSET how_many = PL_op->op_targ;
+    PADOFFSET i = 0;
+
     assert(itersvp);
 
-    switch (CxTYPE(cx)) {
+    for (; i <= how_many; ++i ) {
+        SV *oldsv;
+        SV *sv;
+        AV *av;
+        IV ix;
+        IV inc;
 
-    case CXt_LOOP_LAZYSV: /* string increment */
-    {
-        SV* cur = cx->blk_loop.state_u.lazysv.cur;
-        SV *end = cx->blk_loop.state_u.lazysv.end;
-        /* If the maximum is !SvOK(), pp_enteriter substitutes PL_sv_no.
-           It has SvPVX of "" and SvCUR of 0, which is what we want.  */
-        STRLEN maxlen = 0;
-        const char *max = SvPV_const(end, maxlen);
-        if (DO_UTF8(end) && IN_UNI_8_BIT)
-            maxlen = sv_len_utf8_nomg(end);
-        if (UNLIKELY(SvNIOK(cur) || SvCUR(cur) > maxlen))
-            goto retno;
+        switch (type) {
 
-        oldsv = *itersvp;
-        /* NB: on the first iteration, oldsv will have a ref count of at
-         * least 2 (one extra from blk_loop.itersave), so the GV or pad
-         * slot will get localised; on subsequent iterations the RC==1
-         * optimisation may kick in and the SV will be reused. */
-         if (oldsv && LIKELY(SvREFCNT(oldsv) == 1 && !SvMAGICAL(oldsv))) {
-            /* safe to reuse old SV */
-            sv_setsv(oldsv, cur);
-        }
-        else
-        {
-            /* we need a fresh SV every time so that loop body sees a
-             * completely new SV for closures/references to work as
-             * they used to */
-            *itersvp = newSVsv(cur);
-            SvREFCNT_dec(oldsv);
-        }
-        if (strEQ(SvPVX_const(cur), max))
-            sv_setiv(cur, 0); /* terminate next time */
-        else
-            sv_inc(cur);
-        break;
-    }
-
-    case CXt_LOOP_LAZYIV: /* integer increment */
-    {
-        IV cur = cx->blk_loop.state_u.lazyiv.cur;
-        if (UNLIKELY(cur > cx->blk_loop.state_u.lazyiv.end))
-            goto retno;
-
-        oldsv = *itersvp;
-        /* see NB comment above */
-        if (oldsv && LIKELY(SvREFCNT(oldsv) == 1 && !SvMAGICAL(oldsv))) {
-            /* safe to reuse old SV */
-
-            if (    (SvFLAGS(oldsv) & (SVTYPEMASK|SVf_THINKFIRST|SVf_IVisUV))
-                 == SVt_IV)
+        case CXt_LOOP_LAZYSV: /* string increment */
             {
-                /* Cheap SvIOK_only().
-                 * Assert that flags which SvIOK_only() would test or
-                 * clear can't be set, because we're SVt_IV */
-                assert(!(SvFLAGS(oldsv) &
-                    (SVf_OOK|SVf_UTF8|(SVf_OK & ~(SVf_IOK|SVp_IOK)))));
-                SvFLAGS(oldsv) |= (SVf_IOK|SVp_IOK);
-                /* SvIV_set() where sv_any points to head */
-                oldsv->sv_u.svu_iv = cur;
+                SV* cur = cx->blk_loop.state_u.lazysv.cur;
+                SV *end = cx->blk_loop.state_u.lazysv.end;
+                /* If the maximum is !SvOK(), pp_enteriter substitutes PL_sv_no.
+                   It has SvPVX of "" and SvCUR of 0, which is what we want.  */
+                STRLEN maxlen = 0;
+                const char *max = SvPV_const(end, maxlen);
+                bool pad_it = FALSE;
+                if (DO_UTF8(end) && IN_UNI_8_BIT)
+                    maxlen = sv_len_utf8_nomg(end);
+                if (UNLIKELY(SvNIOK(cur) || SvCUR(cur) > maxlen)) {
+                    if (LIKELY(!i)) {
+                        goto retno;
+                    }
+                    /* We are looping n-at-a-time and the range isn't a multiple
+                       of n, so we fill the rest of the lexicals with undef.
+                       This only happens on the last iteration of the loop, and
+                       we will have already set up the "terminate next time"
+                       condition earlier in this for loop for this call of the
+                       ITER op when we set up the lexical corresponding to the
+                       last value in the range. Hence we don't goto retno (yet),
+                       and just below we don't repeat the setup for "terminate
+                       next time". */
+                    pad_it = TRUE;
+                }
 
+                oldsv = *itersvp;
+                /* NB: on the first iteration, oldsv will have a ref count of at
+                 * least 2 (one extra from blk_loop.itersave), so the GV or pad
+                 * slot will get localised; on subsequent iterations the RC==1
+                 * optimisation may kick in and the SV will be reused. */
+                if (UNLIKELY(pad_it)) {
+                    *itersvp = &PL_sv_undef;
+                    SvREFCNT_dec(oldsv);
+                }
+                else if (oldsv && LIKELY(SvREFCNT(oldsv) == 1 && !SvMAGICAL(oldsv))) {
+                    /* safe to reuse old SV */
+                    sv_setsv(oldsv, cur);
+                }
+                else {
+                    /* we need a fresh SV every time so that loop body sees a
+                     * completely new SV for closures/references to work as
+                     * they used to */
+                    *itersvp = newSVsv(cur);
+                    SvREFCNT_dec(oldsv);
+                }
+
+                if (UNLIKELY(pad_it)) {
+                    /* We're "beyond the end" of the iterator here, filling the
+                       extra lexicals with undef, so we mustn't do anything
+                       (further) to the the iterator itself at this point.
+                       (Observe how the other two blocks modify the iterator's
+                       value) */
+                }
+                else if (strEQ(SvPVX_const(cur), max))
+                    sv_setiv(cur, 0); /* terminate next time */
+                else
+                    sv_inc(cur);
+                break;
             }
-            else
-                sv_setiv(oldsv, cur);
-        }
-        else
-        {
-            /* we need a fresh SV every time so that loop body sees a
-             * completely new SV for closures/references to work as they
-             * used to */
-            *itersvp = newSViv(cur);
-            SvREFCNT_dec(oldsv);
-        }
 
-        if (UNLIKELY(cur == IV_MAX)) {
-            /* Handle end of range at IV_MAX */
-            cx->blk_loop.state_u.lazyiv.end = IV_MIN;
-        } else
-            ++cx->blk_loop.state_u.lazyiv.cur;
-        break;
-    }
+        case CXt_LOOP_LAZYIV: /* integer increment */
+            {
+                IV cur = cx->blk_loop.state_u.lazyiv.cur;
+                bool pad_it = FALSE;
+                if (UNLIKELY(cur > cx->blk_loop.state_u.lazyiv.end)) {
+                    if (LIKELY(!i)) {
+                        goto retno;
+                    }
+                    pad_it = TRUE;
+                }
 
-    case CXt_LOOP_LIST: /* for (1,2,3) */
+                oldsv = *itersvp;
+                /* see NB comment above */
+                if (UNLIKELY(pad_it)) {
+                    *itersvp = &PL_sv_undef;
+                    SvREFCNT_dec(oldsv);
+                }
+                else if (oldsv && LIKELY(SvREFCNT(oldsv) == 1 && !SvMAGICAL(oldsv))) {
+                    /* safe to reuse old SV */
 
-        assert(OPpITER_REVERSED == 2); /* so inc becomes -1 or 1 */
-        inc = (IV)1 - (IV)(PL_op->op_private & OPpITER_REVERSED);
-        ix = (cx->blk_loop.state_u.stack.ix += inc);
-        if (UNLIKELY(inc > 0
-                        ? ix > cx->blk_oldsp
-                        : ix <= cx->blk_loop.state_u.stack.basesp)
-        )
-            goto retno;
+                    if (    (SvFLAGS(oldsv) & (SVTYPEMASK|SVf_THINKFIRST|SVf_IVisUV))
+                         == SVt_IV) {
+                        /* Cheap SvIOK_only().
+                         * Assert that flags which SvIOK_only() would test or
+                         * clear can't be set, because we're SVt_IV */
+                        assert(!(SvFLAGS(oldsv) &
+                                 (SVf_OOK|SVf_UTF8|(SVf_OK & ~(SVf_IOK|SVp_IOK)))));
+                        SvFLAGS(oldsv) |= (SVf_IOK|SVp_IOK);
+                        /* SvIV_set() where sv_any points to head */
+                        oldsv->sv_u.svu_iv = cur;
 
-        sv = PL_stack_base[ix];
-        av = NULL;
-        goto loop_ary_common;
+                    }
+                    else
+                        sv_setiv(oldsv, cur);
+                }
+                else {
+                    /* we need a fresh SV every time so that loop body sees a
+                     * completely new SV for closures/references to work as they
+                     * used to */
+                    *itersvp = newSViv(cur);
+                    SvREFCNT_dec(oldsv);
+                }
 
-    case CXt_LOOP_ARY: /* for (@ary) */
-
-        av = cx->blk_loop.state_u.ary.ary;
-        inc = (IV)1 - (IV)(PL_op->op_private & OPpITER_REVERSED);
-        ix = (cx->blk_loop.state_u.ary.ix += inc);
-        if (UNLIKELY(inc > 0
-                        ? ix > AvFILL(av)
-                        : ix < 0)
-        )
-            goto retno;
-
-        if (UNLIKELY(SvRMAGICAL(av))) {
-            SV * const * const svp = av_fetch(av, ix, FALSE);
-            sv = svp ? *svp : NULL;
-        }
-        else {
-            sv = AvARRAY(av)[ix];
-        }
-
-      loop_ary_common:
-
-        if (UNLIKELY(cx->cx_type & CXp_FOR_LVREF)) {
-            SvSetMagicSV(*itersvp, sv);
-            break;
-        }
-
-        if (LIKELY(sv)) {
-            if (UNLIKELY(SvIS_FREED(sv))) {
-                *itersvp = NULL;
-                Perl_croak(aTHX_ "Use of freed value in iteration");
+                if (UNLIKELY(pad_it)) {
+                    /* We're good (see "We are looping n-at-a-time" comment
+                       above). */
+                }
+                else if (UNLIKELY(cur == IV_MAX)) {
+                    /* Handle end of range at IV_MAX */
+                    cx->blk_loop.state_u.lazyiv.end = IV_MIN;
+                } else
+                    ++cx->blk_loop.state_u.lazyiv.cur;
+                break;
             }
-            if (SvPADTMP(sv)) {
-                sv = newSVsv(sv);
+
+        case CXt_LOOP_LIST: /* for (1,2,3) */
+
+            assert(OPpITER_REVERSED == 2); /* so inc becomes -1 or 1 */
+            inc = (IV)1 - (IV)(PL_op->op_private & OPpITER_REVERSED);
+            ix = (cx->blk_loop.state_u.stack.ix += inc);
+            if (UNLIKELY(inc > 0
+                         ? ix > cx->blk_oldsp
+                         : ix <= cx->blk_loop.state_u.stack.basesp)
+                ) {
+                if (LIKELY(!i)) {
+                    goto retno;
+                }
+
+                sv = &PL_sv_undef;
             }
             else {
-                SvTEMP_off(sv);
-                SvREFCNT_inc_simple_void_NN(sv);
+                sv = PL_stack_base[ix];
             }
-        }
-        else if (av) {
-            sv = newSVavdefelem(av, ix, 0);
-        }
-        else
-            sv = &PL_sv_undef;
 
-        oldsv = *itersvp;
-        *itersvp = sv;
-        SvREFCNT_dec(oldsv);
-        break;
+            av = NULL;
+            goto loop_ary_common;
 
-    default:
-        DIE(aTHX_ "panic: pp_iter, type=%u", CxTYPE(cx));
+        case CXt_LOOP_ARY: /* for (@ary) */
+
+            av = cx->blk_loop.state_u.ary.ary;
+            inc = (IV)1 - (IV)(PL_op->op_private & OPpITER_REVERSED);
+            ix = (cx->blk_loop.state_u.ary.ix += inc);
+            if (UNLIKELY(inc > 0
+                         ? ix > AvFILL(av)
+                         : ix < 0)
+                ) {
+                if (LIKELY(!i)) {
+                    goto retno;
+                }
+
+                sv = &PL_sv_undef;
+            } else if (UNLIKELY(SvRMAGICAL(av))) {
+                SV * const * const svp = av_fetch(av, ix, FALSE);
+                sv = svp ? *svp : NULL;
+            }
+            else {
+                sv = AvARRAY(av)[ix];
+            }
+
+        loop_ary_common:
+
+            if (UNLIKELY(cx->cx_type & CXp_FOR_LVREF)) {
+                SvSetMagicSV(*itersvp, sv);
+                break;
+            }
+
+            if (LIKELY(sv)) {
+                if (UNLIKELY(SvIS_FREED(sv))) {
+                    *itersvp = NULL;
+                    Perl_croak(aTHX_ "Use of freed value in iteration");
+                }
+                if (SvPADTMP(sv)) {
+                    sv = newSVsv(sv);
+                }
+                else {
+                    SvTEMP_off(sv);
+                    SvREFCNT_inc_simple_void_NN(sv);
+                }
+            }
+            else if (av) {
+                sv = newSVavdefelem(av, ix, 0);
+            }
+            else
+                sv = &PL_sv_undef;
+
+            oldsv = *itersvp;
+            *itersvp = sv;
+            SvREFCNT_dec(oldsv);
+            break;
+
+        default:
+            DIE(aTHX_ "panic: pp_iter, type=%u", CxTYPE(cx));
+        }
+
+        /* Only relevant for a many-at-a-time loop: */
+        ++itersvp;
     }
 
     /* Try to bypass pushing &PL_sv_yes and calling pp_and(); instead
@@ -4189,7 +4351,6 @@ PP(pp_subst)
     STRLEN len;
     int force_on_match = 0;
     const I32 oldsave = PL_savestack_ix;
-    STRLEN slen;
     bool doutf8 = FALSE; /* whether replacement is in utf8 */
 #ifdef PERL_ANY_COW
     bool was_cow;
@@ -4255,10 +4416,12 @@ PP(pp_subst)
         DIE(aTHX_ "panic: pp_subst, pm=%p, orig=%p", pm, orig);
 
     strend = orig + len;
-    slen = DO_UTF8(TARG) ? utf8_length((U8*)orig, (U8*)strend) : len;
-    maxiters = 2 * slen + 10;	/* We can match twice at each
-                                   position, once with zero-length,
-                                   second time with non-zero. */
+    /* We can match twice at each position, once with zero-length,
+     * second time with non-zero.
+     * Don't handle utf8 specially; we can use length-in-bytes as an
+     * upper bound on length-in-characters, and avoid the cpu-cost of
+     * computing a tighter bound. */
+    maxiters = 2 * len + 10;
 
     /* handle the empty pattern */
     if (!RX_PRELEN(rx) && PL_curpm && !prog->mother_re) {
@@ -4835,7 +4998,7 @@ Perl_leave_adjust_stacks(pTHX_ SV **from_sp, SV **to_sp, U8 gimme, int pass)
                  *    ++PL_tmps_ix, moving the previous occupant there
                  *    instead.
                  */
-                SV *newsv = newSV(0);
+                SV *newsv = newSV_type(SVt_NULL);
 
                 PL_tmps_stack[++PL_tmps_ix] = *tmps_basep;
                 /* put it on the tmps stack early so it gets freed if we die */
@@ -5450,7 +5613,7 @@ Perl_vivify_ref(pTHX_ SV *sv, U32 to_what)
         prepare_SV_for_RV(sv);
         switch (to_what) {
         case OPpDEREF_SV:
-            SvRV_set(sv, newSV(0));
+            SvRV_set(sv, newSV_type(SVt_NULL));
             break;
         case OPpDEREF_AV:
             SvRV_set(sv, MUTABLE_SV(newAV()));
@@ -5599,7 +5762,7 @@ PP(pp_method_named)
 {
     dSP;
     GV* gv;
-    SV* const meth = cMETHOPx_meth(PL_op);
+    SV* const meth = cMETHOP_meth;
     HV* const stash = opmethod_stash(meth);
 
     if (LIKELY(SvTYPE(stash) == SVt_PVHV)) {
@@ -5618,7 +5781,7 @@ PP(pp_method_super)
     dSP;
     GV* gv;
     HV* cache;
-    SV* const meth = cMETHOPx_meth(PL_op);
+    SV* const meth = cMETHOP_meth;
     HV* const stash = CopSTASH(PL_curcop);
     /* Actually, SUPER doesn't need real object's (or class') stash at all,
      * as it uses CopSTASH. However, we must ensure that object(class) is
@@ -5640,12 +5803,12 @@ PP(pp_method_redir)
 {
     dSP;
     GV* gv;
-    SV* const meth = cMETHOPx_meth(PL_op);
-    HV* stash = gv_stashsv(cMETHOPx_rclass(PL_op), 0);
+    SV* const meth = cMETHOP_meth;
+    HV* stash = gv_stashsv(cMETHOP_rclass, 0);
     opmethod_stash(meth); /* not used but needed for error checks */
 
     if (stash) { METHOD_CHECK_CACHE(stash, stash, meth); }
-    else stash = MUTABLE_HV(cMETHOPx_rclass(PL_op));
+    else stash = MUTABLE_HV(cMETHOP_rclass);
 
     gv = gv_fetchmethod_sv_flags(stash, meth, GV_AUTOLOAD|GV_CROAK);
     assert(gv);
@@ -5659,11 +5822,11 @@ PP(pp_method_redir_super)
     dSP;
     GV* gv;
     HV* cache;
-    SV* const meth = cMETHOPx_meth(PL_op);
-    HV* stash = gv_stashsv(cMETHOPx_rclass(PL_op), 0);
+    SV* const meth = cMETHOP_meth;
+    HV* stash = gv_stashsv(cMETHOP_rclass, 0);
     opmethod_stash(meth); /* not used but needed for error checks */
 
-    if (UNLIKELY(!stash)) stash = MUTABLE_HV(cMETHOPx_rclass(PL_op));
+    if (UNLIKELY(!stash)) stash = MUTABLE_HV(cMETHOP_rclass);
     else if ((cache = HvMROMETA(stash)->super)) {
          METHOD_CHECK_CACHE(stash, cache, meth);
     }

@@ -297,42 +297,6 @@ Perl_mg_set(pTHX_ SV *sv)
     return 0;
 }
 
-/*
-=for apidoc mg_length
-
-Reports on the SV's length in bytes, calling length magic if available,
-but does not set the UTF8 flag on C<sv>.  It will fall back to 'get'
-magic if there is no 'length' magic, but with no indication as to
-whether it called 'get' magic.  It assumes C<sv> is a C<PVMG> or
-higher.  Use C<sv_len()> instead.
-
-=cut
-*/
-
-U32
-Perl_mg_length(pTHX_ SV *sv)
-{
-    MAGIC* mg;
-    STRLEN len;
-
-    PERL_ARGS_ASSERT_MG_LENGTH;
-
-    for (mg = SvMAGIC(sv); mg; mg = mg->mg_moremagic) {
-        const MGVTBL * const vtbl = mg->mg_virtual;
-        if (vtbl && vtbl->svt_len) {
-            const I32 mgs_ix = SSNEW(sizeof(MGS));
-            save_magic(mgs_ix, sv);
-            /* omit MGf_GSKIP -- not changed here */
-            len = vtbl->svt_len(aTHX_ sv, mg);
-            restore_magic(INT2PTR(void*, (IV)mgs_ix));
-            return len;
-        }
-    }
-
-    (void)SvPV_const(sv, len);
-    return len;
-}
-
 I32
 Perl_mg_size(pTHX_ SV *sv)
 {
@@ -760,15 +724,16 @@ Perl_magic_regdatum_set(pTHX_ SV *sv, MAGIC *mg)
     NORETURN_FUNCTION_END;
 }
 
-#define SvRTRIM(sv) STMT_START { \
-    if (SvPOK(sv)) { \
-        STRLEN len = SvCUR(sv); \
-        char * const p = SvPVX(sv); \
-        while (len > 0 && isSPACE(p[len-1])) \
-           --len; \
-        SvCUR_set(sv, len); \
-        p[len] = '\0'; \
-    } \
+#define SvRTRIM(sv) STMT_START {                \
+    SV * sv_ = sv;                              \
+    if (SvPOK(sv_)) {                           \
+        STRLEN len = SvCUR(sv_);                \
+        char * const p = SvPVX(sv_);            \
+        while (len > 0 && isSPACE(p[len-1]))    \
+           --len;                               \
+        SvCUR_set(sv_, len);                    \
+        p[len] = '\0';                          \
+    }                                           \
 } STMT_END
 
 void
@@ -808,37 +773,6 @@ S_fixup_errno_string(pTHX_ SV* sv)
     if(strEQ(SvPVX(sv), "")) {
         sv_catpv(sv, UNKNOWN_ERRNO_MSG);
     }
-    else {
-
-        /* In some locales the error string may come back as UTF-8, in which
-         * case we should turn on that flag.  This didn't use to happen, and to
-         * avoid as many possible backward compatibility issues as possible, we
-         * don't turn on the flag unless we have to.  So the flag stays off for
-         * an entirely invariant string.  We assume that if the string looks
-         * like UTF-8 in a single script, it really is UTF-8:  "text in any
-         * other encoding that uses bytes with the high bit set is extremely
-         * unlikely to pass a UTF-8 validity test"
-         * (http://en.wikipedia.org/wiki/Charset_detection).  There is a
-         * potential that we will get it wrong however, especially on short
-         * error message text, so do an additional check. */
-        if ( ! IN_BYTES  /* respect 'use bytes' */
-            && is_utf8_non_invariant_string((U8*) SvPVX_const(sv), SvCUR(sv))
-
-#ifdef USE_LOCALE_MESSAGES
-
-            &&  _is_cur_LC_category_utf8(LC_MESSAGES)
-
-#else   /* If can't check directly, at least can see if script is consistent,
-           under UTF-8, which gives us an extra measure of confidence. */
-
-            && isSCRIPT_RUN((const U8 *) SvPVX_const(sv), (U8 *) SvEND(sv),
-                            TRUE) /* Means assume UTF-8 */
-#endif
-
-        ) {
-            SvUTF8_on(sv);
-        }
-    }
 }
 
 /*
@@ -876,11 +810,16 @@ SV *
 Perl_sv_string_from_errnum(pTHX_ int errnum, SV *tgtsv)
 {
     char const *errstr;
+    utf8ness_t utf8ness;
+
     if(!tgtsv)
-        tgtsv = sv_newmortal();
-    errstr = my_strerror(errnum);
+        tgtsv = newSV_type_mortal(SVt_PV);
+    errstr = my_strerror(errnum, &utf8ness);
     if(errstr) {
         sv_setpv(tgtsv, errstr);
+        if (utf8ness == UTF8NESS_YES) {
+            SvUTF8_on(tgtsv);
+        }
         fixup_errno_string(tgtsv);
     } else {
         SvPVCLEAR(tgtsv);
@@ -899,10 +838,13 @@ Perl_magic_get(pTHX_ SV *sv, MAGIC *mg)
     I32 paren;
     const char *s = NULL;
     REGEXP *rx;
-    const char * const remaining = mg->mg_ptr + 1;
     char nextchar;
 
     PERL_ARGS_ASSERT_MAGIC_GET;
+
+    const char * const remaining = (mg->mg_ptr)
+                                   ? mg->mg_ptr + 1
+                                   : NULL;
 
     if (!mg->mg_ptr) {
         paren = mg->mg_len;
@@ -957,7 +899,19 @@ Perl_magic_get(pTHX_ SV *sv, MAGIC *mg)
 #elif defined(OS2)
         if (!(_emx_env & 0x200)) {	/* Under DOS */
             sv_setnv(sv, (NV)errno);
-            sv_setpv(sv, errno ? my_strerror(errno) : "");
+            if (errno) {
+                utf8ness_t utf8ness;
+                const char * errstr = my_strerror(errnum, &utf8ness);
+
+                sv_setpv(sv, errstr);
+
+                if (utf8ness == UTF8NESS_YES) {
+                    SvUTF8_on(sv);
+                }
+            }
+            else {
+                SvPVCLEAR(sv);
+            }
         } else {
             if (errno != errno_isOS2) {
                 const int tmp = _syserrno();
@@ -977,6 +931,14 @@ Perl_magic_get(pTHX_ SV *sv, MAGIC *mg)
             if (dwErr) {
                 PerlProc_GetOSError(sv, dwErr);
                 fixup_errno_string(sv);
+
+#     ifdef USE_LOCALE
+                if (   IN_LOCALE
+                    && get_win32_message_utf8ness(SvPV_nomg_const_nolen(sv)))
+                {
+                    SvUTF8_on(sv);
+                }
+#     endif
             }
             else
                 SvPVCLEAR(sv);
@@ -1296,7 +1258,7 @@ Perl_magic_setenv(pTHX_ SV *sv, MAGIC *mg)
         /* defined environment variables are byte strings; unfortunately
            there is no SvPVbyte_force_nomg(), so we must do this piecewise */
         (void)SvPV_force_nomg_nolen(sv);
-        sv_utf8_downgrade(sv, /* fail_ok */ TRUE);
+        (void)sv_utf8_downgrade(sv, /* fail_ok */ TRUE);
         if (SvUTF8(sv)) {
             Perl_ck_warner_d(aTHX_ packWARN(WARN_UTF8), "Wide character in %s", "setenv");
             SvUTF8_off(sv);
@@ -1316,7 +1278,7 @@ Perl_magic_setenv(pTHX_ SV *sv, MAGIC *mg)
     }
 #endif
 
-#if !defined(OS2) && !defined(WIN32) && !defined(MSDOS)
+#if !defined(OS2) && !defined(WIN32)
                             /* And you'll never guess what the dog had */
                             /*   in its mouth... */
     if (TAINTING_get) {
@@ -1350,18 +1312,27 @@ Perl_magic_setenv(pTHX_ SV *sv, MAGIC *mg)
 #endif /* VMS */
         if (s && memEQs(key, klen, "PATH")) {
             const char * const strend = s + len;
+#ifdef __VMS  /* Hmm.  How do we get $Config{path_sep} from C? */
+            const char path_sep = PL_perllib_sep;
+#else
+            const char path_sep = ':';
+#endif
 
+#ifndef __VMS
+            /* Does this apply for VMS?
+             * Empty PATH on linux is treated same as ".", which is forbidden
+             * under taint. So check if the PATH variable is empty. */
+            if (!len) {
+                MgTAINTEDDIR_on(mg);
+                return 0;
+            }
+#endif
             /* set MGf_TAINTEDDIR if any component of the new path is
              * relative or world-writeable */
             while (s < strend) {
                 char tmpbuf[256];
                 Stat_t st;
                 I32 i;
-#ifdef __VMS  /* Hmm.  How do we get $Config{path_sep} from C? */
-                const char path_sep = PL_perllib_sep;
-#else
-                const char path_sep = ':';
-#endif
                 s = delimcpy_no_escape(tmpbuf, tmpbuf + sizeof tmpbuf,
                              s, strend, path_sep, &i);
                 s++;
@@ -1372,7 +1343,8 @@ Perl_magic_setenv(pTHX_ SV *sv, MAGIC *mg)
                       /* Using Unix separator, e.g. under bash, so act line Unix */
                       || (PL_perllib_sep == ':' && *tmpbuf != '/')
 #else
-                      || *tmpbuf != '/'       /* no starting slash -- assume relative path */
+                      || *tmpbuf != '/' /* no starting slash -- assume relative path */
+                      || s == strend    /* trailing empty component -- same as "." */
 #endif
                       || (PerlLIO_stat(tmpbuf, &st) == 0 && (st.st_mode & 2)) ) {
                     MgTAINTEDDIR_on(mg);
@@ -1381,7 +1353,7 @@ Perl_magic_setenv(pTHX_ SV *sv, MAGIC *mg)
             }
         }
     }
-#endif /* neither OS2 nor WIN32 nor MSDOS */
+#endif /* neither OS2 nor WIN32 */
 
     return 0;
 }
@@ -3367,6 +3339,16 @@ Perl_magic_set(pTHX_ SV *sv, MAGIC *mg)
         else sv_setiv(mg->mg_obj, (IV)PerlProc_getpid());
         break;
     case '0':
+        if (!sv_utf8_downgrade(sv, /* fail_ok */ TRUE)) {
+
+            /* Since we are going to set the string's UTF8-encoded form
+               as the process name we should update $0 itself to contain
+               that same (UTF8-encoded) value. */
+            sv_utf8_encode(GvSV(mg->mg_obj));
+
+            Perl_ck_warner_d(aTHX_ packWARN(WARN_UTF8), "Wide character in %s", "$0");
+        }
+
         LOCK_DOLLARZERO_MUTEX;
         S_set_dollarzero(aTHX_ sv);
         UNLOCK_DOLLARZERO_MUTEX;

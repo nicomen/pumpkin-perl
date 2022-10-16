@@ -73,7 +73,7 @@ true)
 		esac
 		;;
 	cygwin*)
-		shrpldflags="$shrpldflags -Wl,--out-implib=libperl.dll.a -Wl,--image-base,0x52000000"
+		shrpldflags="$shrpldflags -Wl,--out-implib=libperl.dll.a"
 		linklibperl="-L. -lperl"
 		;;
 	sunos*)
@@ -118,9 +118,15 @@ true)
 		linklibperl="-L `pwd | sed 's/\/UU$//'` -Wl,+s -Wl,+b$archlibexp/CORE -lperl"
 		;;
 	os390*)
-            shrpldflags='-Wl,XPLINK,dll'
-	    linklibperl='libperl.x'
-	    ;;
+            case "$use64bitall" in
+            define|true|[yY]*) shrpldflags='-Wl,LP64,dll'
+                   linklibperl='libperl.x'
+                   ;;
+            *)     shrpldflags='-Wl,XPLINK,dll'
+	           linklibperl='libperl.x'
+	           ;;
+            esac
+            ;;
 	esac
 	case "$ldlibpthname" in
 	'') ;;
@@ -530,9 +536,9 @@ h5 = utf8.h warnings.h mydtrace.h op_reg_common.h l1_char_class_tab.h
 h6 = charclass_invlists.h
 h = $(h1) $(h2) $(h3) $(h4) $(h5) $(h6)
 
-c1 = av.c scope.c op.c doop.c doio.c dump.c gv.c hv.c mg.c reentr.c mro_core.c perl.c
+c1 = av.c scope.c op.c peep.c doop.c doio.c dump.c gv.c hv.c mg.c reentr.c mro_core.c perl.c
 c2 = perly.c pp.c pp_hot.c pp_ctl.c pp_sys.c regcomp.c regexec.c utf8.c sv.c
-c3 = taint.c toke.c util.c deb.c run.c universal.c pad.c globals.c keywords.c
+c3 = taint.c toke.c util.c deb.c run.c builtin.c universal.c pad.c globals.c keywords.c
 c4 = perlio.c numeric.c mathoms.c locale.c pp_pack.c pp_sort.c caretx.c dquote.c time64.c
 c5 = $(mallocsrc)
 
@@ -548,8 +554,8 @@ $spitshell >>$Makefile <<'!NO!SUBS!'
 
 c = $(c1) $(c2) $(c3) $(c4) $(c5) miniperlmain.c $(mini_only_src)
 
-obj1 = $(mallocobj) gv$(OBJ_EXT) toke$(OBJ_EXT) perly$(OBJ_EXT) pad$(OBJ_EXT) regcomp$(OBJ_EXT) dump$(OBJ_EXT) util$(OBJ_EXT) mg$(OBJ_EXT) reentr$(OBJ_EXT) mro_core$(OBJ_EXT) keywords$(OBJ_EXT)
-obj2 = hv$(OBJ_EXT) av$(OBJ_EXT) run$(OBJ_EXT) pp_hot$(OBJ_EXT) sv$(OBJ_EXT) pp$(OBJ_EXT) scope$(OBJ_EXT) pp_ctl$(OBJ_EXT) pp_sys$(OBJ_EXT)
+obj1 = $(mallocobj) gv$(OBJ_EXT) toke$(OBJ_EXT) perly$(OBJ_EXT) pad$(OBJ_EXT) regcomp$(OBJ_EXT) dump$(OBJ_EXT) util$(OBJ_EXT) mg$(OBJ_EXT) reentr$(OBJ_EXT) mro_core$(OBJ_EXT) keywords$(OBJ_EXT) builtin$(OBJ_EXT)
+obj2 = hv$(OBJ_EXT) av$(OBJ_EXT) run$(OBJ_EXT) pp_hot$(OBJ_EXT) sv$(OBJ_EXT) pp$(OBJ_EXT) scope$(OBJ_EXT) pp_ctl$(OBJ_EXT) pp_sys$(OBJ_EXT) peep$(OBJ_EXT)
 obj3 = doop$(OBJ_EXT) doio$(OBJ_EXT) regexec$(OBJ_EXT) utf8$(OBJ_EXT) taint$(OBJ_EXT) deb$(OBJ_EXT) globals$(OBJ_EXT) perlio$(OBJ_EXT) numeric$(OBJ_EXT) mathoms$(OBJ_EXT) locale$(OBJ_EXT) pp_pack$(OBJ_EXT) pp_sort$(OBJ_EXT) caretx$(OBJ_EXT) dquote$(OBJ_EXT) time64$(OBJ_EXT)
 
 # split the objects into 3 exclusive sets: those used by both miniperl and
@@ -607,7 +613,7 @@ esac
 
 $spitshell >>$Makefile <<'!NO!SUBS!'
 
-perltoc_pod_prereqs = extra.pods pod/perl5355delta.pod pod/perlapi.pod pod/perlintern.pod pod/perlmodlib.pod pod/perluniprops.pod
+perltoc_pod_prereqs = extra.pods pod/perl5375delta.pod pod/perlapi.pod pod/perlintern.pod pod/perlmodlib.pod pod/perluniprops.pod
 generated_pods = pod/perltoc.pod $(perltoc_pod_prereqs)
 generated_headers = uudmap.h bitcount.h mg_data.h
 
@@ -647,11 +653,11 @@ lintflags = \
 	@echo `$(CCCMD)` $(PLDLFLAGS) $*.c
 	@`$(CCCMD)` $(PLDLFLAGS) $*.c
 
-.c.i:	perl.h config.h
+.c.i:
 	@echo `$(CCCMDSRC)` -E $*.c \> $*.i
 	@`$(CCCMDSRC)` -E $*.c > $*.i
 
-.c.s:	perl.h config.h
+.c.s:
 	@echo `$(CCCMDSRC)` -S $*.c
 	@`$(CCCMDSRC)` -S $*.c
 
@@ -958,6 +964,7 @@ $(LIBPERL): $& $(perllib_dep) $(DYNALOADER) $(LIBPERLEXPORT)
 # b) have the rest of the Makefile depend on the more obvious $(MINIPERL_EXE)
 
 $(MINIPERL_EXE): lib/buildcustomize.pl
+	@touch $(MINIPERL_EXE)
 
 !NO!SUBS!
 
@@ -1104,7 +1111,7 @@ $(CONFIGPOD): config.sh $(MINIPERL_EXE) configpm Porting/Glossary lib/Config_git
 unidatafiles $(unidatafiles) pod/perluniprops.pod: uni.data
 
 uni.data: $(MINIPERL_EXE) $(CONFIGPM) lib/unicore/mktables $(nonxs_ext)
-	$(MINIPERL) lib/unicore/mktables -C lib/unicore -P pod -maketest -makelist -p
+	$(MINIPERL) lib/unicore/mktables -C lib/unicore -P pod -maketest -makenormtest -makelist -p
 #	Commented out so always runs, mktables looks at far more files than we
 #	can in this makefile to decide if needs to run or not
 #	touch uni.data
@@ -1123,9 +1130,9 @@ pod/perlintern.pod: $(MINIPERL_EXE) autodoc.pl embed.fnc
 pod/perlmodlib.pod: $(MINIPERL_EXE) pod/perlmodlib.PL MANIFEST
 	$(MINIPERL) pod/perlmodlib.PL -q
 
-pod/perl5355delta.pod: pod/perldelta.pod
-	$(RMS) pod/perl5355delta.pod
-	$(LNS) perldelta.pod pod/perl5355delta.pod
+pod/perl5375delta.pod: pod/perldelta.pod
+	$(RMS) pod/perl5375delta.pod
+	$(LNS) perldelta.pod pod/perl5375delta.pod
 
 extra.pods: $(MINIPERL_EXE)
 	-@test ! -f extra.pods || rm -f `cat extra.pods`
@@ -1421,17 +1428,18 @@ _cleaner2:
 	-rmdir lib/Search lib/Scalar lib/Pod/Text lib/Pod/Simple
 	-rmdir lib/Pod/Perldoc lib/Pod/Html lib/PerlIO/via lib/PerlIO lib/Perl
 	-rmdir lib/Parse/CPAN lib/Parse lib/Params lib/Net/FTP lib/Module/Load
-	-rmdir lib/Module/CoreList lib/Module lib/Memoize lib/Math/BigInt
-	-rmdir lib/Math/BigFloat lib/Math lib/MIME lib/Locale/Maketext
-	-rmdir lib/Locale lib/List/Util lib/List lib/JSON/PP lib/JSON lib/IPC
-	-rmdir lib/IO/Uncompress/Adapter lib/IO/Uncompress lib/IO/Socket
-	-rmdir lib/IO/Compress/Zlib lib/IO/Compress/Zip lib/IO/Compress/Gzip
-	-rmdir lib/IO/Compress/Base lib/IO/Compress/Adapter lib/IO/Compress
-	-rmdir lib/IO lib/I18N/LangTags lib/I18N lib/Hash/Util lib/Hash
-	-rmdir lib/HTTP lib/Filter/Util lib/Filter lib/File/Spec
-	-rmdir lib/ExtUtils/Typemaps lib/ExtUtils/ParseXS
-	-rmdir lib/ExtUtils/MakeMaker/version lib/ExtUtils/MakeMaker
-	-rmdir lib/ExtUtils/Liblist lib/ExtUtils/Constant lib/ExtUtils/Command
+	-rmdir lib/Module/CoreList lib/Module lib/Memoize lib/Math/BigRat
+	-rmdir lib/Math/BigInt lib/Math/BigFloat lib/Math lib/MIME
+	-rmdir lib/Locale/Maketext lib/Locale lib/List/Util lib/List
+	-rmdir lib/JSON/PP lib/JSON lib/IPC lib/IO/Uncompress/Adapter
+	-rmdir lib/IO/Uncompress lib/IO/Socket lib/IO/Compress/Zlib
+	-rmdir lib/IO/Compress/Zip lib/IO/Compress/Gzip lib/IO/Compress/Base
+	-rmdir lib/IO/Compress/Adapter lib/IO/Compress lib/IO
+	-rmdir lib/I18N/LangTags lib/I18N lib/Hash/Util lib/Hash lib/HTTP
+	-rmdir lib/Filter/Util lib/Filter lib/File/Spec lib/ExtUtils/Typemaps
+	-rmdir lib/ExtUtils/ParseXS lib/ExtUtils/MakeMaker/version
+	-rmdir lib/ExtUtils/MakeMaker lib/ExtUtils/Liblist
+	-rmdir lib/ExtUtils/Constant lib/ExtUtils/Command
 	-rmdir lib/ExtUtils/CBuilder/Platform/Windows
 	-rmdir lib/ExtUtils/CBuilder/Platform lib/ExtUtils/CBuilder
 	-rmdir lib/Exporter lib/Encode/Unicode lib/Encode/MIME/Header
@@ -1625,7 +1633,7 @@ $spitshell >>$Makefile <<'!NO!SUBS!'
 
 # minitest can't depend on lib/Config.pm because that might be where miniperl
 # is crashing.
-minitest_prep:
+minitest_prep: $(MINIPERL_EXE)
 	-@test -f lib/Config.pm || $(MAKE) lib/Config.pm $(unidatafiles)
 	@echo " "
 	@echo "You may see some irrelevant test failures if you have been unable"
@@ -1635,10 +1643,10 @@ minitest_prep:
 
 MINITEST_TESTS = base/*.t comp/*.t cmd/*.t run/*.t io/*.t re/*.t opbasic/*.t op/*.t uni/*.t perf/*.t
 
-minitest: $(MINIPERL_EXE) minitest_prep
+minitest: minitest_prep
 	cd t && $(RUN_PERL) TEST $(MINITEST_TESTS) <$(devtty)
 
-minitest-notty minitest_notty: $(MINIPERL_EXE) minitest_prep
+minitest-notty minitest_notty: minitest_prep
 	cd t && PERL_SKIP_TTY_TEST=1 $(RUN_PERL) TEST $(MINITEST_TESTS)
 
 # Test via harness
@@ -1650,13 +1658,13 @@ test_harness_notty: test_prep
 	HARNESS_NOTTY=1 TESTFILE=harness $(RUN_TESTS) choose
 
 test_reonly test-reonly: test_prep_reonly
-	TEST_ARGS='-re \bre\/' TESTFILE=harness $(RUN_TESTS) choose
+	TEST_ARGS='re/*.t ext/re/t/*.t' TESTFILE=harness $(RUN_TESTS) choose
 
 
 # Porting tests (well-formedness of pod, manifest, etc)
 
 test_porting test-porting: test_prep
-	cd t && $(RUN_PERL) harness porting/*.t ../lib/diagnostics.t
+	TEST_ARGS='porting/*.t lib/diagnostics.t' TESTFILE=harness $(RUN_TESTS) choose
 
 !NO!SUBS!
 

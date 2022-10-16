@@ -22,12 +22,9 @@ I<github.com>.
 
 You can make a read-only clone of the repository by running:
 
-  % git clone git://github.com/Perl/perl5.git perl
+  % git clone git@github.com:Perl/perl5.git perl
 
-This uses the git protocol (port 9418).
-
-If you cannot use the git protocol for firewall reasons, you can also
-clone via http:
+If you cannot use that for firewall reasons, you can also clone via http:
 
   % git clone https://github.com/Perl/perl5.git perl
 
@@ -787,6 +784,27 @@ placeholder for the work's description.
 When describing the merge commit, explain the purpose of the branch, and
 keep in mind that this description will probably be used by the
 eventual release engineer when reviewing the next perldelta document.
+
+If the subsequent I<push> fails then you must be careful on how you I<rebase>.
+If you use
+
+  % git rebase p5p/blead
+
+or
+
+  % git pull --rebase
+
+then your carefully created merge commit will be lost! To avoid this you
+can use:
+
+  % git fetch p5p
+  % git rebase --rebase-merges p5p/blead
+
+This will recreate your merge commit.
+
+(Should you be stuck with an older version of git (prior to 2.18), then
+C<git rebase> will not have the C<--rebase-merges> switch, instead you
+have to use the C<--preserve-merges> switch.)
 
 =head2 Committing to maintenance versions
 

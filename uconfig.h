@@ -1038,18 +1038,6 @@
 /*#define HAS_STATIC_INLINE				/ **/
 #define PERL_STATIC_INLINE static	/**/
 
-/* PERL_THREAD_LOCAL:
- *	This symbol, if defined, gives a linkage specification for thread-local
- *	storage. For example, for a C11 compiler this will be _Thread_local.
- *	Beware, some compilers are sensitive to the C language standard they are
- *	told to parse. For example, suncc defaults to C11, so our probe will
- *	report that _Thread_local can be used. However, if the -std=c99 is later
- *	added to the compiler flags, then _Thread_local will become a syntax
- *	error. Hence it is important for these flags to be consistent between
- *	probing and use.
- */
-/*#define PERL_THREAD_LOCAL 	/ **/
-
 /* USE_STDIO_PTR:
  *	This symbol is defined if the _ptr and _cnt fields (or similar)
  *	of the stdio FILE structure can be used to access the stdio buffer
@@ -1241,8 +1229,8 @@
  *	This symbol contains the ~name expanded version of ARCHLIB, to be used
  *	in programs that are not prepared to deal with ~ expansion at run-time.
  */
-/*#define ARCHLIB "/usr/local/lib/perl5/5.35/unknown"		/ **/
-/*#define ARCHLIB_EXP "/usr/local/lib/perl5/5.35/unknown"		/ **/
+/*#define ARCHLIB "/usr/local/lib/perl5/5.37/unknown"		/ **/
+/*#define ARCHLIB_EXP "/usr/local/lib/perl5/5.37/unknown"		/ **/
 
 /* BIN:
  *	This symbol holds the path of the bin directory where the package will
@@ -1295,8 +1283,8 @@
  *	This symbol contains the ~name expanded version of PRIVLIB, to be used
  *	in programs that are not prepared to deal with ~ expansion at run-time.
  */
-#define PRIVLIB "/usr/local/lib/perl5/5.35"		/**/
-#define PRIVLIB_EXP "/usr/local/lib/perl5/5.35"		/**/
+#define PRIVLIB "/usr/local/lib/perl5/5.37"		/**/
+#define PRIVLIB_EXP "/usr/local/lib/perl5/5.37"		/**/
 
 /* SITEARCH:
  *	This symbol contains the name of the private library for this package.
@@ -1313,8 +1301,8 @@
  *	This symbol contains the ~name expanded version of SITEARCH, to be used
  *	in programs that are not prepared to deal with ~ expansion at run-time.
  */
-/*#define SITEARCH "/usr/local/lib/perl5/5.35/unknown"		/ **/
-/*#define SITEARCH_EXP "/usr/local/lib/perl5/5.35/unknown"		/ **/
+/*#define SITEARCH "/usr/local/lib/perl5/5.37/unknown"		/ **/
+/*#define SITEARCH_EXP "/usr/local/lib/perl5/5.37/unknown"		/ **/
 
 /* SITELIB:
  *	This symbol contains the name of the private library for this package.
@@ -1336,8 +1324,8 @@
  *	removed.  The elements in inc_version_list (inc_version_list.U) can
  *	be tacked onto this variable to generate a list of directories to search.
  */
-#define SITELIB "/usr/local/lib/perl5/5.35"		/**/
-#define SITELIB_EXP "/usr/local/lib/perl5/5.35"		/**/
+#define SITELIB "/usr/local/lib/perl5/5.37"		/**/
+#define SITELIB_EXP "/usr/local/lib/perl5/5.37"		/**/
 #define SITELIB_STEM "/usr/local/lib/perl5"		/**/
 
 /* PERL_VENDORARCH:
@@ -1472,6 +1460,10 @@
  *	Can we handle GCC attribute for functions that should always be
  *	inlined.
  */
+/* HASATTRIBUTE_VISIBILITY:
+ *	Can we handle GCC attribute for functions that should have a
+ *	different visibility.
+ */
 /*#define HASATTRIBUTE_DEPRECATED	/ **/
 /*#define HASATTRIBUTE_FORMAT	/ **/
 /*#define PRINTF_FORMAT_NULL_OK	/ **/
@@ -1482,6 +1474,7 @@
 /*#define HASATTRIBUTE_UNUSED	/ **/
 /*#define HASATTRIBUTE_WARN_UNUSED_RESULT	/ **/
 /*#define HASATTRIBUTE_ALWAYS_INLINE	/ **/
+/*#define HASATTRIBUTE_VISIBILITY	/ **/
 
 /* HAS_BACKTRACE:
  *	This symbol, if defined, indicates that the backtrace() routine is
@@ -3271,6 +3264,12 @@
  */
 /*#define HAS_SENDMSG		/ **/
 
+/* HAS_SETENV:
+ *	This symbol, if defined, indicates that the setenv routine is
+ *	available for use.
+ */
+/*#define HAS_SETENV		/ **/
+
 /* HAS_SETITIMER:
  *	This symbol, if defined, indicates that the setitimer routine is
  *	available to set interval timers.
@@ -3377,9 +3376,9 @@
  *	does have the f_flags member containing the mount flags of
  *	the filesystem containing the file.
  *	This kind of struct statfs is coming from <sys/mount.h> (BSD 4.3),
- *	not from <sys/statfs.h> (SYSV).  Older BSDs (like Ultrix) do not
- *	have statfs() and struct statfs, they have ustat() and getmnt()
- *	with struct ustat and struct fs_data.
+ *	not from <sys/statfs.h> (SYSV).  Older BSDs do not have statfs() and
+ *	struct statfs, they have ustat() and getmnt() with struct ustat and
+ *	struct fs_data.
  */
 /*#define HAS_STRUCT_STATFS_F_FLAGS		/ **/
 
@@ -4182,6 +4181,9 @@
  *	This symbol holds the signedness of struct stat's st_dev.
  *	1 for unsigned, -1 for signed.
  */
+#define ST_DEV_SIGN 1	/* st_dev sign */
+#define ST_DEV_SIZE 4	/* st_dev size */
+
 /* ST_INO_SIZE:
  *	This variable contains the size of struct stat's st_ino in bytes.
  */
@@ -4189,8 +4191,6 @@
  *	This symbol holds the signedness of struct stat's st_ino.
  *	1 for unsigned, -1 for signed.
  */
-#define ST_DEV_SIGN 1	/* st_dev sign */
-#define ST_DEV_SIZE 4	/* st_dev size */
 #define ST_INO_SIGN 1	/* st_ino sign */
 #define ST_INO_SIZE 4	/* st_ino size */
 
@@ -5152,6 +5152,18 @@
  */
 /*#define HAS_STRTOLD_L		/ **/
 
+/* PERL_THREAD_LOCAL:
+ *	This symbol, if defined, gives a linkage specification for thread-local
+ *	storage. For example, for a C11 compiler this will be _Thread_local.
+ *	Beware, some compilers are sensitive to the C language standard they are
+ *	told to parse. For example, suncc defaults to C11, so our probe will
+ *	report that _Thread_local can be used. However, if the -std=c99 is later
+ *	added to the compiler flags, then _Thread_local will become a syntax
+ *	error. Hence it is important for these flags to be consistent between
+ *	probing and use.
+ */
+/*#define PERL_THREAD_LOCAL 	/ **/
+
 /* HAS_TMPNAM_R:
  *	This symbol, if defined, indicates that the tmpnam_r routine
  *	is available to tmpnam re-entrantly.
@@ -5339,6 +5351,6 @@
 #endif
 
 /* Generated from:
- * a551aebc3302cae7ae872b150e8a40760112ce0046e2a26fa4e86e2cfc9f0719 config_h.SH
- * 192cfd7d6b90e7961582dadbf7e6ae6de3e4fa6ffde19a0f7148a8572ec635f9 uconfig.sh
+ * 72a47a9b71961a7325395f1b8ca5e40f71099b60c5f4abbc6c872a8ee4597b08 config_h.SH
+ * bfca76a5b377754c7113eda85ec235ff8776e891a4041ce385a874c7788409a6 uconfig.sh
  * ex: set ro: */

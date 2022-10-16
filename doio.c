@@ -218,6 +218,57 @@ Perl_PerlLIO_dup2_cloexec(pTHX_ int oldfd, int newfd)
 #endif
 }
 
+#if defined(OEMVS)
+  #if (__CHARSET_LIB == 1)
+#   include <stdio.h>
+#   include <stdlib.h>
+
+    static int setccsid(int fd, int ccsid) 
+    {
+      attrib_t attr;
+      int rc;
+
+      memset(&attr, 0, sizeof(attr));
+      attr.att_filetagchg = 1;
+      attr.att_filetag.ft_ccsid = ccsid;
+      attr.att_filetag.ft_txtflag = 1;
+
+      rc = __fchattr(fd, &attr, sizeof(attr));
+      return rc;
+    }
+
+    static void updateccsid(int fd, const char* path, int oflag, int perm) 
+    { 
+      int rc;
+      if (oflag & O_CREAT) {
+        rc = setccsid(fd, 819);
+      }
+    }
+
+    int asciiopen(const char* path, int oflag) 
+    {
+      int rc;
+      int fd = open(path, oflag);
+      if (fd == -1) { 
+        return fd;
+      }
+      updateccsid(fd, path, oflag, -1);
+      return fd; 
+    }
+
+    int asciiopen3(const char* path, int oflag, int perm) 
+    {
+      int rc;
+      int fd = open(path, oflag, perm);
+      if (fd == -1) { 
+        return fd;
+      }
+      updateccsid(fd, path, oflag, perm);
+      return fd;
+    } 
+  #endif
+#endif
+
 int
 Perl_PerlLIO_open_cloexec(pTHX_ const char *file, int flag)
 {
@@ -246,19 +297,47 @@ Perl_PerlLIO_open3_cloexec(pTHX_ const char *file, int flag, int perm)
 #endif
 }
 
+#if defined(OEMVS)
+  #if (__CHARSET_LIB == 1)
+    #define TEMP_CCSID 819
+  #endif
+static int Internal_Perl_my_mkstemp_cloexec(char *templte)
+{     
+    PERL_ARGS_ASSERT_MY_MKSTEMP_CLOEXEC;
+#  if defined(O_CLOEXEC)
+    DO_ONEOPEN_EXPERIMENTING_CLOEXEC(
+	PL_strategy_mkstemp,
+   	Perl_my_mkostemp(templte, O_CLOEXEC),
+        Perl_my_mkstemp(templte));
+#  else
+    DO_ONEOPEN_THEN_CLOEXEC(Perl_my_mkstemp(templte));
+#  endif
+}
 int
-Perl_my_mkstemp_cloexec(char *templte)
+Perl_my_mkstemp_cloexec(char *templte) 
+{
+    int tempfd = Internal_Perl_my_mkstemp_cloexec(templte);
+#  if defined(TEMP_CCSID)
+    setccsid(tempfd, TEMP_CCSID);
+#  endif
+    return tempfd;
+}
+
+#  else /* Below is ! OEMVS */
+int
+Perl_my_mkstemp_cloexec(char *templte) 
 {
     PERL_ARGS_ASSERT_MY_MKSTEMP_CLOEXEC;
-#if defined(O_CLOEXEC)
+#  if defined(O_CLOEXEC)
     DO_ONEOPEN_EXPERIMENTING_CLOEXEC(
         PL_strategy_mkstemp,
         Perl_my_mkostemp(templte, O_CLOEXEC),
         Perl_my_mkstemp(templte));
-#else
+#  else
     DO_ONEOPEN_THEN_CLOEXEC(Perl_my_mkstemp(templte));
-#endif
+#  endif
 }
+#endif
 
 int
 Perl_my_mkostemp_cloexec(char *templte, int flags)
@@ -1389,9 +1468,6 @@ Perl_nextargv(pTHX_ GV *gv, bool nomagicopen)
                     if ((PerlLIO_stat(SvPVX_const(sv),&statbuf) >= 0
                          && statbuf.st_dev == filedev
                          && statbuf.st_ino == fileino)
-#ifdef DJGPP
-                        || ((_djstat_fail_bits & _STFAIL_TRUENAME)!=0)
-#endif
                       )
                     {
                         Perl_ck_warner_d(aTHX_ packWARN(WARN_INPLACE),
@@ -1556,7 +1632,7 @@ S_dir_unchanged(pTHX_ const char *orig_pv, MAGIC *mg) {
     S_dir_unchanged(aTHX_ (orig_psv), (mg))
 
 STATIC bool
-S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
+S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool is_explict) {
     bool retval;
 
     /* ensure args are checked before we start using them */
@@ -1603,7 +1679,7 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
 #endif
         }
 
-        retval = io_close(io, NULL, not_implicit, FALSE);
+        retval = io_close(io, NULL, is_explict, FALSE);
 
         if (SvIV(*pid_psv) != (IV)PerlProc_getpid()) {
             /* this is a child process, don't duplicate our rename() etc
@@ -1648,7 +1724,7 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
                         PerlLIO_rename(orig_pv, SvPVX(*back_psv)) < 0
 #  endif
                         ) {
-                        if (!not_implicit) {
+                        if (!is_explict) {
 #  ifdef ARGV_USE_ATFUNCTIONS
                             if (unlinkat(dfd, SvPVX_const(*temp_psv), 0) < 0 &&
                                 UNLIKELY(NotSupported(errno)) &&
@@ -1666,7 +1742,7 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
 #else
                     (void)UNLINK(SvPVX(*back_psv));
                     if (link(orig_pv, SvPVX(*back_psv))) {
-                        if (!not_implicit) {
+                        if (!is_explict) {
                             Perl_croak(aTHX_ "Can't rename %s to %s: %s, skipping file",
                                        SvPVX(*orig_psv), SvPVX(*back_psv), Strerror(errno));
                         }
@@ -1695,7 +1771,7 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
                 PerlLIO_rename(SvPVX(*temp_psv), orig_pv) < 0
 #endif
                 ) {
-                if (!not_implicit) {
+                if (!is_explict) {
 #ifdef ARGV_USE_ATFUNCTIONS
                     if (unlinkat(dfd, SvPVX_const(*temp_psv), 0) < 0 &&
                         NotSupported(errno))
@@ -1724,7 +1800,7 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
 #else
             UNLINK(SvPVX_const(*temp_psv));
 #endif
-            if (!not_implicit) {
+            if (!is_explict) {
                 Perl_croak(aTHX_ "Failed to close in-place work file %s: %s",
                            SvPVX(*temp_psv), Strerror(errno));
             }
@@ -1735,9 +1811,25 @@ S_argvout_final(pTHX_ MAGIC *mg, IO *io, bool not_implicit) {
     return retval;
 }
 
-/* explicit renamed to avoid C++ conflict    -- kja */
+/*
+=for apidoc do_close
+
+Close an I/O stream.  This implements Perl L<perlfunc/C<close>>.
+
+C<gv> is the glob associated with the stream.
+
+C<is_explict> is C<true> if this is an explicit close of the stream; C<false>
+if it is part of another operation, such as closing a pipe (which involves
+implicitly closing both ends).
+
+Returns C<true> if successful; otherwise returns C<false> and sets C<errno> to
+indicate the cause.
+
+=cut
+*/
+
 bool
-Perl_do_close(pTHX_ GV *gv, bool not_implicit)
+Perl_do_close(pTHX_ GV *gv, bool is_explict)
 {
     bool retval;
     IO *io;
@@ -1746,13 +1838,13 @@ Perl_do_close(pTHX_ GV *gv, bool not_implicit)
     if (!gv)
         gv = PL_argvgv;
     if (!gv || !isGV_with_GP(gv)) {
-        if (not_implicit)
+        if (is_explict)
             SETERRNO(EBADF,SS_IVCHAN);
         return FALSE;
     }
     io = GvIO(gv);
     if (!io) {		/* never opened */
-        if (not_implicit) {
+        if (is_explict) {
             report_evil_fh(gv);
             SETERRNO(EBADF,SS_IVCHAN);
         }
@@ -1760,13 +1852,13 @@ Perl_do_close(pTHX_ GV *gv, bool not_implicit)
     }
     if ((mg = mg_findext((SV*)io, PERL_MAGIC_uvar, &argvout_vtbl))
         && mg->mg_obj) {
-        retval = argvout_final(mg, io, not_implicit);
+        retval = argvout_final(mg, io, is_explict);
         mg_freeext((SV*)io, PERL_MAGIC_uvar, &argvout_vtbl);
     }
     else {
-        retval = io_close(io, NULL, not_implicit, FALSE);
+        retval = io_close(io, NULL, is_explict, FALSE);
     }
-    if (not_implicit) {
+    if (is_explict) {
         IoLINES(io) = 0;
         IoPAGE(io) = 0;
         IoLINES_LEFT(io) = IoPAGE_LEN(io);
@@ -1776,7 +1868,7 @@ Perl_do_close(pTHX_ GV *gv, bool not_implicit)
 }
 
 bool
-Perl_io_close(pTHX_ IO *io, GV *gv, bool not_implicit, bool warn_on_fail)
+Perl_io_close(pTHX_ IO *io, GV *gv, bool is_explict, bool warn_on_fail)
 {
     bool retval = FALSE;
 
@@ -1795,7 +1887,7 @@ Perl_io_close(pTHX_ IO *io, GV *gv, bool not_implicit, bool warn_on_fail)
             */
             IoOFP(io) = IoIFP(io) = NULL;
             status = PerlProc_pclose(fh);
-            if (not_implicit) {
+            if (is_explict) {
                 STATUS_NATIVE_CHILD_SET(status);
                 retval = (STATUS_UNIX == 0);
             }
@@ -1840,7 +1932,7 @@ Perl_io_close(pTHX_ IO *io, GV *gv, bool not_implicit, bool warn_on_fail)
                                  SVfARG(get_sv("!",GV_ADD)));
         }
     }
-    else if (not_implicit) {
+    else if (is_explict) {
         SETERRNO(EBADF,SS_IVCHAN);
     }
 
@@ -1998,13 +2090,21 @@ Perl_mode_from_discipline(pTHX_ const char *s, STRLEN len)
     return mode;
 }
 
+/*
+=for apidoc my_chsize
+
+The C library L<chsize(3)> if available, or a Perl implementation of it.
+
+=cut
+*/
+
 #if !defined(HAS_TRUNCATE) && !defined(HAS_CHSIZE)
 I32
 my_chsize(int fd, Off_t length)
 {
-#ifdef F_FREESP
+#  ifdef F_FREESP
         /* code courtesy of William Kucharski */
-#define HAS_CHSIZE
+#  define HAS_CHSIZE
 
     Stat_t filebuf;
 
@@ -2044,9 +2144,9 @@ my_chsize(int fd, Off_t length)
 
     }
     return 0;
-#else
+#  else
     Perl_croak_nocontext("truncate not implemented");
-#endif /* F_FREESP */
+#  endif /* F_FREESP */
     return -1;
 }
 #endif /* !HAS_TRUNCATE && !HAS_CHSIZE */
@@ -3311,9 +3411,6 @@ Perl_vms_start_glob
     sv_setpv(tmpcmd, "for a in ");
     sv_catsv(tmpcmd, tmpglob);
     sv_catpvs(tmpcmd, "; do echo \"$a\\0\\c\"; done |");
-#  elif defined(DJGPP)
-    sv_setpv(tmpcmd, "/dev/dosglob/"); /* File System Extension */
-    sv_catsv(tmpcmd, tmpglob);
 #  else
     sv_setpv(tmpcmd, "perlglob ");
     sv_catsv(tmpcmd, tmpglob);

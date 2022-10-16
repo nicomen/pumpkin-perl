@@ -51,8 +51,8 @@ use strict;
 # id            Both    integer value for this opcode/state
 # optype        Both    Either 'op' or 'state'
 # line_num      Both    line_num number of the input file for this item.
-# type          Op      Type of node (aka regkind)
-# code          Op      Apparently not used
+# type          Op      Type of node (aka regnode_kind)
+# code          Op      Meta about the node, used to detect variable length nodes
 # suffix        Op      which regnode struct this uses, so if this is '1', it
 #                       uses 'struct regnode_1'
 # flags         Op      S for simple; V for varies
@@ -272,10 +272,10 @@ sub print_process_EXACTish {
     print $out <<EOP,
 
 /* Is 'op', known to be of type EXACT, folding? */
-#define isEXACTFish(op) (__ASSERT_(PL_regkind[op] == EXACT) (PL_EXACTFish_bitmask & (1U << (op - EXACT))))
+#define isEXACTFish(op) (__ASSERT_(REGNODE_TYPE(op) == EXACT) (PL_EXACTFish_bitmask & (1U << (op - EXACT))))
 
 /* Do only UTF-8 target strings match 'op', known to be of type EXACT? */
-#define isEXACT_REQ8(op) (__ASSERT_(PL_regkind[op] == EXACT) (PL_EXACT_REQ8_bitmask & (1U << (op - EXACT))))
+#define isEXACT_REQ8(op) (__ASSERT_(REGNODE_TYPE(op) == EXACT) (PL_EXACT_REQ8_bitmask & (1U << (op - EXACT))))
 
 #ifndef DOINIT
 EXTCONST U32 PL_EXACTFish_bitmask;
@@ -456,105 +456,102 @@ sub print_state_def_line
     print $fh "\n"; # Blank line separates groups for clarity
 }
 
-sub print_regkind {
+sub print_typedefs {
     my ($out)= @_;
     print $out <<EOP;
 
-/* PL_regkind[] What type of regop or state is this. */
+/* typedefs for regex nodes - one typedef per node type */
+
+EOP
+    my $len= 0;
+    foreach my $node (@ops) {
+        if ($node->{suffix} and $len < length($node->{suffix})) {
+            $len= length $node->{suffix};
+        }
+    }
+    $len += length "struct regnode_";
+    $len = (int($len/5)+2)*5;
+    my $prefix= "tregnode";
+
+    foreach my $node (sort { $a->{name} cmp $b->{name} } @ops) {
+        my $struct_name= "struct regnode";
+        if (my $suffix= $node->{suffix}) {
+            $struct_name .= "_$suffix";
+        }
+        $node->{typedef}= $prefix . "_" . $node->{name};
+        printf $out "typedef %*s %s;\n", -$len, $struct_name, $node->{typedef};
+    }
+    print $out <<EOP;
+
+/* end typedefs */
+
+EOP
+
+}
+
+
+
+
+sub print_regnode_info {
+    my ($out)= @_;
+    print $out <<EOP;
+
+/* PL_regnode_info[] - Opcode/state names in string form, for debugging */
 
 #ifndef DOINIT
-EXTCONST U8 PL_regkind[];
+EXTCONST struct regnode_meta PL_regnode_info[];
 #else
-EXTCONST U8 PL_regkind[] = {
+EXTCONST struct regnode_meta PL_regnode_info[] = {
 EOP
-    use Data::Dumper;
-    foreach my $node (@all) {
-        print Dumper($node) if !defined $node->{type} or !defined( $node->{name} );
-        printf $out "\t%*s\t/* %*s */\n",
-            -1 - $twidth, "$node->{type},", -$base_name_width, $node->{name};
-        print $out "\t/* ------------ States ------------- */\n"
-            if $node->{id} == $#ops and $node->{id} != $#all;
+    my @fields= qw(type arg_len arg_len_varies off_by_arg);
+    foreach my $node_idx (0..$#all) {
+        my $node= $all[$node_idx];
+        {
+            my $size= 0;
+            $size= "EXTRA_SIZE($node->{typedef})" if $node->{suffix};
+            $node->{arg_len}= $size;
+
+        }
+        {
+            my $varies= 0;
+            $varies= 1 if $node->{code} and $node->{code}=~"str";
+            $node->{arg_len_varies}= $varies;
+        }
+        $node->{off_by_arg}= $node->{longj} || 0;
+        print $out "    {\n";
+        print $out "        /* #$node_idx $node->{optype} $node->{name} */\n";
+        foreach my $f_idx (0..$#fields) {
+            my $field= $fields[$f_idx];
+            printf $out  "        .%s = %s", $field, $node->{$field} // 0;
+            printf $out $f_idx == $#fields ? "\n" : ",\n";
+        }
+        print $out "    }";
+        print $out $node_idx==$#all ? "\n" : ",\n";
     }
 
     print $out <<EOP;
 };
-#endif
-EOP
-}
-
-sub wrap_ifdef_print {
-    my $out= shift;
-    my $token= shift;
-    print $out <<EOP;
-
-#ifdef $token
-EOP
-    $_->($out) for @_;
-    print $out <<EOP;
-#endif /* $token */
+#endif /* DOINIT */
 
 EOP
 }
 
-sub print_regarglen {
+
+sub print_regnode_name {
     my ($out)= @_;
     print $out <<EOP;
 
-/* regarglen[] - How large is the argument part of the node (in regnodes) */
-
-static const U8 regarglen[] = {
-EOP
-
-    foreach my $node (@ops) {
-        my $size= 0;
-        $size= "EXTRA_SIZE(struct regnode_$node->{suffix})" if $node->{suffix};
-
-        printf $out "\t%*s\t/* %*s */\n", -37, "$size,", -$rwidth, $node->{name};
-    }
-
-    print $out <<EOP;
-};
-EOP
-}
-
-sub print_reg_off_by_arg {
-    my ($out)= @_;
-    print $out <<EOP;
-
-/* reg_off_by_arg[] - Which argument holds the offset to the next node */
-
-static const char reg_off_by_arg[] = {
-EOP
-
-    foreach my $node (@ops) {
-        my $size= $node->{longj} || 0;
-
-        printf $out "\t%d,\t/* %*s */\n", $size, -$rwidth, $node->{name};
-    }
-
-    print $out <<EOP;
-};
-
-EOP
-}
-
-sub print_reg_name {
-    my ($out)= @_;
-    print $out <<EOP;
-
-/* reg_name[] - Opcode/state names in string form, for debugging */
+/* PL_regnode_name[] - Opcode/state names in string form, for debugging */
 
 #ifndef DOINIT
-EXTCONST char * PL_reg_name[];
+EXTCONST char * PL_regnode_name[];
 #else
-EXTCONST char * const PL_reg_name[] = {
+EXTCONST char * const PL_regnode_name[] = {
 EOP
 
     my $ofs= 0;
     my $sym= "";
     foreach my $node (@all) {
-        my $size= $node->{longj} || 0;
-
         printf $out "\t%*s\t/* $sym%#04x */\n",
             -3 - $base_name_width, qq("$node->{name}",), $node->{id} - $ofs;
         if ( $node->{id} == $#ops and @ops != @all ) {
@@ -802,18 +799,21 @@ END_OF_DESCR
 
 my $confine_to_core = 'defined(PERL_CORE) || defined(PERL_EXT_RE_BUILD)';
 read_definition("regcomp.sym");
+if ($ENV{DUMP}) {
+    require Data::Dumper;
+    print Data::Dumper::Dumper(\@all);
+    exit(1);
+}
 my $out= open_new( 'regnodes.h', '>',
     { by => 'regen/regcomp.pl', from => 'regcomp.sym' } );
 print $out "#if $confine_to_core\n\n";
+print_typedefs($out);
 print_state_defs($out);
-print_regkind($out);
-wrap_ifdef_print(
-    $out,
-    "REG_COMP_C",
-    \&print_regarglen,
-    \&print_reg_off_by_arg
-);
-print_reg_name($out);
+
+print_regnode_name($out);
+print_regnode_info($out);
+
+
 print_reg_extflags_name($out);
 print_reg_intflags_name($out);
 print_process_flags($out);

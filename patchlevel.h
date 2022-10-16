@@ -38,7 +38,7 @@ Instead use one of the version comparison macros.  See C<L</PERL_VERSION_EQ>>.
  * exactly on the third column */
 
 #define PERL_REVISION	5		/* age */
-#define PERL_VERSION	35		/* epoch */
+#define PERL_VERSION	37		/* epoch */
 #define PERL_SUBVERSION	5		/* generation */
 
 /* The following numbers describe the earliest compatible version of
@@ -59,7 +59,7 @@ Instead use one of the version comparison macros.  See C<L</PERL_VERSION_EQ>>.
    changing them should not be necessary.
 */
 #define PERL_API_REVISION	5
-#define PERL_API_VERSION	35
+#define PERL_API_VERSION	37
 #define PERL_API_SUBVERSION	5
 /*
    XXX Note:  The selection of non-default Configure options, such
@@ -118,11 +118,12 @@ open PLIN, "<", "patchlevel.h" or die "Couldn't open patchlevel.h : $!";
 open PLOUT, ">", "patchlevel.new" or die "Couldn't write on patchlevel.new : $!";
 my $seen=0;
 while (<PLIN>) {
-    if (/\t,NULL/ and $seen) {
+    if (/^(\s+),NULL/ and $seen) {
+       my $pre = $1;
        while (my $c = shift @ARGV){
             $c =~ s|\\|\\\\|g;
             $c =~ s|"|\\"|g;
-            print PLOUT qq{\t,"$c"\n};
+            print PLOUT qq{$pre,"$c"\n};
        }
     }
     $seen++ if /local_patches\[\]/;
@@ -153,7 +154,7 @@ hunk.
 #    define PERL_PATCHNUM "UNKNOWN-microperl"
 #    define PERL_GIT_UNPUSHED_COMMITS /*leave-this-comment*/
 #  else
-#include "git_version.h"
+#    include "git_version.h"
 #  endif
 static const char * const local_patches[] = {
         NULL

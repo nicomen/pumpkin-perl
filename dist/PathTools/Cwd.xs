@@ -15,13 +15,19 @@
 #  include "ppport.h"
 #endif
 
+#if defined(HAS_READLINK) && !defined(PerlLIO_readlink)
+#define PerlLIO_readlink readlink
+#endif
+
 #ifdef I_UNISTD
 #   include <unistd.h>
 #endif
 
 /* For special handling of os390 sysplexed systems */
+#ifdef OS390
 #define SYSNAME "$SYSNAME"
 #define SYSNAME_LEN (sizeof(SYSNAME) - 1)
+#endif
 
 /* The realpath() implementation from OpenBSD 3.9 to 4.2 (realpath.c 1.13)
  * Renamed here to bsd_realpath() to avoid library conflicts.
@@ -198,7 +204,7 @@ bsd_realpath(const char *path, char resolved[MAXPATHLEN])
                     if (slen < 0)
                         return (NULL);
                     symlink[slen] = '\0';
-#  ifdef EBCDIC /* XXX Probably this should be only os390 */
+#  ifdef OS390
                     /* Replace all instances of $SYSNAME/foo simply by /foo */
                     if (slen > SYSNAME_LEN + strlen(next_token)
                         && strnEQ(symlink, SYSNAME, SYSNAME_LEN)
@@ -241,7 +247,7 @@ bsd_realpath(const char *path, char resolved[MAXPATHLEN])
                     }
                     remaining_len = my_strlcpy(remaining, symlink, sizeof(remaining));
                 }
-#  ifdef EBCDIC
+#  ifdef OS390
               not_symlink: ;
 #  endif
             }

@@ -1073,18 +1073,6 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
 #$d_static_inline HAS_STATIC_INLINE				/**/
 #define PERL_STATIC_INLINE $perl_static_inline	/**/
 
-/* PERL_THREAD_LOCAL:
- *	This symbol, if defined, gives a linkage specification for thread-local
- *	storage. For example, for a C11 compiler this will be _Thread_local.
- *	Beware, some compilers are sensitive to the C language standard they are
- *	told to parse. For example, suncc defaults to C11, so our probe will
- *	report that _Thread_local can be used. However, if the -std=c99 is later
- *	added to the compiler flags, then _Thread_local will become a syntax
- *	error. Hence it is important for these flags to be consistent between
- *	probing and use.
- */
-#$d_thread_local PERL_THREAD_LOCAL $perl_thread_local	/**/
-
 /* USE_STDIO_PTR:
  *	This symbol is defined if the _ptr and _cnt fields (or similar)
  *	of the stdio FILE structure can be used to access the stdio buffer
@@ -1507,6 +1495,10 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  *	Can we handle GCC attribute for functions that should always be
  *	inlined.
  */
+/* HASATTRIBUTE_VISIBILITY:
+ *	Can we handle GCC attribute for functions that should have a
+ *	different visibility.
+ */
 #$d_attribute_deprecated HASATTRIBUTE_DEPRECATED	/**/
 #$d_attribute_format HASATTRIBUTE_FORMAT	/**/
 #$d_printf_format_null PRINTF_FORMAT_NULL_OK	/**/
@@ -1517,6 +1509,7 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
 #$d_attribute_unused HASATTRIBUTE_UNUSED	/**/
 #$d_attribute_warn_unused_result HASATTRIBUTE_WARN_UNUSED_RESULT	/**/
 #$d_attribute_always_inline HASATTRIBUTE_ALWAYS_INLINE	/**/
+#$d_attribute_visibility HASATTRIBUTE_VISIBILITY	/**/
 
 /* HAS_BACKTRACE:
  *	This symbol, if defined, indicates that the backtrace() routine is
@@ -3306,6 +3299,12 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  */
 #$d_sendmsg HAS_SENDMSG		/**/
 
+/* HAS_SETENV:
+ *	This symbol, if defined, indicates that the setenv routine is
+ *	available for use.
+ */
+#$d_setenv HAS_SETENV		/**/
+
 /* HAS_SETITIMER:
  *	This symbol, if defined, indicates that the setitimer routine is
  *	available to set interval timers.
@@ -3412,9 +3411,9 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  *	does have the f_flags member containing the mount flags of
  *	the filesystem containing the file.
  *	This kind of struct statfs is coming from <sys/mount.h> (BSD 4.3),
- *	not from <sys/statfs.h> (SYSV).  Older BSDs (like Ultrix) do not
- *	have statfs() and struct statfs, they have ustat() and getmnt()
- *	with struct ustat and struct fs_data.
+ *	not from <sys/statfs.h> (SYSV).  Older BSDs do not have statfs() and
+ *	struct statfs, they have ustat() and getmnt() with struct ustat and
+ *	struct fs_data.
  */
 #$d_statfs_f_flags HAS_STRUCT_STATFS_F_FLAGS		/**/
 
@@ -4217,6 +4216,9 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  *	This symbol holds the signedness of struct stat's st_dev.
  *	1 for unsigned, -1 for signed.
  */
+#define ST_DEV_SIGN $st_dev_sign	/* st_dev sign */
+#define ST_DEV_SIZE $st_dev_size	/* st_dev size */
+
 /* ST_INO_SIZE:
  *	This variable contains the size of struct stat's st_ino in bytes.
  */
@@ -4224,8 +4226,6 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  *	This symbol holds the signedness of struct stat's st_ino.
  *	1 for unsigned, -1 for signed.
  */
-#define ST_DEV_SIGN $st_dev_sign	/* st_dev sign */
-#define ST_DEV_SIZE $st_dev_size	/* st_dev size */
 #define ST_INO_SIGN $st_ino_sign	/* st_ino sign */
 #define ST_INO_SIZE $st_ino_size	/* st_ino size */
 
@@ -5186,6 +5186,18 @@ sed <<!GROK!THIS! >$CONFIG_H -e 's!^#undef\(.*/\)\*!/\*#define\1 \*!' -e 's!^#un
  *	available to convert strings to long doubles.
  */
 #$d_strtold_l HAS_STRTOLD_L		/**/
+
+/* PERL_THREAD_LOCAL:
+ *	This symbol, if defined, gives a linkage specification for thread-local
+ *	storage. For example, for a C11 compiler this will be _Thread_local.
+ *	Beware, some compilers are sensitive to the C language standard they are
+ *	told to parse. For example, suncc defaults to C11, so our probe will
+ *	report that _Thread_local can be used. However, if the -std=c99 is later
+ *	added to the compiler flags, then _Thread_local will become a syntax
+ *	error. Hence it is important for these flags to be consistent between
+ *	probing and use.
+ */
+#$d_thread_local PERL_THREAD_LOCAL $perl_thread_local	/**/
 
 /* HAS_TMPNAM_R:
  *	This symbol, if defined, indicates that the tmpnam_r routine

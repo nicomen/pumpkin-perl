@@ -17,7 +17,7 @@ sub _carp {
     return warn @_, " at $file line $line\n";
 }
 
-our $VERSION = '1.302185';
+our $VERSION = '1.302191';
 
 use Test::Builder::Module;
 our @ISA    = qw(Test::Builder::Module);
@@ -411,8 +411,8 @@ sub isnt ($$;$) {
     return $tb->isnt_eq(@_);
 }
 
-*isn't = \&isnt;
-# ' to unconfuse syntax higlighters
+# make this available as isn't()
+*isn::t = \&isnt;
 
 =item B<like>
 
@@ -1409,6 +1409,15 @@ and you'll know immediately when they're fixed.
 Once a todo test starts succeeding, simply move it outside the block.
 When the block is empty, delete it.
 
+Note that, if you leave $TODO unset or undef, Test::More reports failures
+as normal. This can be useful to mark the tests as expected to fail only
+in certain conditions, e.g.:
+
+    TODO: {
+        local $TODO = "$^O doesn't work yet. :(" if !_os_is_supported($^O);
+
+        ...
+    }
 
 =item B<todo_skip>
 
@@ -1761,8 +1770,8 @@ sub eq_set {
 Sometimes the Test::More interface isn't quite enough.  Fortunately,
 Test::More is built on top of L<Test::Builder> which provides a single,
 unified backend for any test library to use.  This means two test
-libraries which both use <Test::Builder> B<can> be used together in the
-same program>.
+libraries which both use L<Test::Builder> B<can> be used together in the
+same program.
 
 If you simply want to do a little tweaking of how the tests behave,
 you can access the underlying L<Test::Builder> object like so:

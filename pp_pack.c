@@ -541,22 +541,24 @@ STATIC const char *
 S_group_end(pTHX_ const char *patptr, const char *patend, char ender)
 {
     PERL_ARGS_ASSERT_GROUP_END;
+    Size_t opened = 0;  /* number of pending opened brackets */
 
     while (patptr < patend) {
         const char c = *patptr++;
 
-        if (isSPACE(c))
-            continue;
-        else if (c == ender)
+        if (opened == 0 && c == ender)
             return patptr-1;
         else if (c == '#') {
             while (patptr < patend && *patptr != '\n')
                 patptr++;
             continue;
-        } else if (c == '(')
-            patptr = group_end(patptr, patend, ')') + 1;
-        else if (c == '[')
-            patptr = group_end(patptr, patend, ']') + 1;
+        } else if (c == '(' || c == '[')
+            ++opened;
+        else if (c == ')' || c == ']') {
+            if (opened == 0)
+                Perl_croak(aTHX_ "Mismatched brackets in template");
+            --opened;
+        }
     }
     Perl_croak(aTHX_ "No group ending character '%c' found in template",
                ender);
@@ -937,6 +939,7 @@ S_unpack_rec(pTHX_ tempsym_t* symptr, const char *s, const char *strbeg, const c
             const U32 group_modifiers = TYPE_MODIFIERS(datumtype & ~symptr->flags);
             symptr->flags |= group_modifiers;
             symptr->patend = savsym.grpend;
+            /* cppcheck-suppress autoVariables */
             symptr->previous = &savsym;
             symptr->level++;
             PUTBACK;
@@ -1320,16 +1323,12 @@ S_unpack_rec(pTHX_ tempsym_t* symptr, const char *s, const char *strbeg, const c
                     len = UTF8SKIP(result);
                     if (!S_utf8_to_bytes(aTHX_ &ptr, strend,
                                       (char *) &result[1], len-1, 'U')) break;
-                    auv = NATIVE_TO_UNI(utf8n_to_uvchr(result,
-                                                       len,
-                                                       &retlen,
-                                                       UTF8_ALLOW_DEFAULT));
+                    auv = utf8n_to_uvchr(result, len, &retlen,
+                                         UTF8_ALLOW_DEFAULT);
                     s = ptr;
                 } else {
-                    auv = NATIVE_TO_UNI(utf8n_to_uvchr((U8*)s,
-                                                       strend - s,
-                                                       &retlen,
-                                                       UTF8_ALLOW_DEFAULT));
+                    auv = utf8n_to_uvchr((U8*)s, strend - s, &retlen,
+                                         UTF8_ALLOW_DEFAULT);
                     if (retlen == (STRLEN) -1)
                         Perl_croak(aTHX_ "Malformed UTF-8 string in unpack");
                     s += retlen;
@@ -2251,6 +2250,7 @@ S_pack_rec(pTHX_ SV *cat, tempsym_t* symptr, SV **beglist, SV **endlist )
             symptr->flags |= group_modifiers;
             symptr->patend = savsym.grpend;
             symptr->level++;
+            /* cppcheck-suppress autoVariables */
             symptr->previous = &lookahead;
             while (len--) {
                 U32 was_utf8;
@@ -2668,7 +2668,7 @@ S_pack_rec(pTHX_ SV *cat, tempsym_t* symptr, SV **beglist, SV **endlist )
                 auv = SvUV_no_inf(fromstr, datumtype);
                 if (utf8) {
                     U8 buffer[UTF8_MAXLEN+1], *endb;
-                    endb = uvchr_to_utf8_flags(buffer, UNI_TO_NATIVE(auv), 0);
+                    endb = uvchr_to_utf8_flags(buffer, auv, 0);
                     if (cur+(endb-buffer)*UTF8_EXPAND >= end) {
                         *cur = '\0';
                         SvCUR_set(cat, cur - start);
@@ -2684,9 +2684,7 @@ S_pack_rec(pTHX_ SV *cat, tempsym_t* symptr, SV **beglist, SV **endlist )
                         GROWING(0, cat, start, cur, len+UTF8_MAXLEN);
                         end = start+SvLEN(cat)-UTF8_MAXLEN;
                     }
-                    cur = (char *) uvchr_to_utf8_flags((U8 *) cur,
-                                                       UNI_TO_NATIVE(auv),
-                                                       0);
+                    cur = (char *) uvchr_to_utf8_flags((U8 *) cur, auv, 0);
                 }
             }
             break;
